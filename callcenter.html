@@ -198,6 +198,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .tt-p { background:var(--glow); color:var(--a2); }
 .tt-d { background:var(--gbg); color:var(--green); }
 .tt-n { background:var(--bg4); color:var(--text3); border:1px solid var(--border); }
+.txn-tag.br { background:var(--rbg); color:var(--red); }
 
 /* Prepay date row inside txn-item */
 .txn-pp-row {
@@ -782,7 +783,7 @@ function renderTxns() {
       <div class="txn-chk">${s==='prepay'?'П':s==='daily'?'✓':''}</div>
       <div class="txn-time">${t.time.slice(0,5)}</div>
       <div class="txn-body">
-        <div class="txn-amt">${kFmt(t.amount)}</div>
+        <div class="txn-amt" ${t.isRefund?'style="color:var(--red)"':''}>${t.isRefund?'↩ ':''}${kFmt(t.amount)}</div>
         <input class="txn-note" placeholder="заметка…" value="${m.note||''}"
           onclick="event.stopPropagation()"
           oninput="meta[${t.id}].note=this.value">
@@ -794,7 +795,7 @@ function renderTxns() {
             oninput="meta[${t.id}].client=this.value">
         </div>
       </div>
-      <div class="txn-tag ${s==='prepay'?'tt-p':s==='daily'?'tt-d':'tt-n'}">${s==='prepay'?'Предоплата':s==='daily'?'Дневной':'—'}</div>`;
+      <div class="txn-tag ${t.isRefund?'br':s==='prepay'?'tt-p':s==='daily'?'tt-d':'tt-n'}">${t.isRefund?'Возврат':s==='prepay'?'Предоплата':s==='daily'?'Дневной':'—'}</div>`;
     div.addEventListener('click', () => cycleTxn(t.id));
     list.appendChild(div);
   });
@@ -1178,29 +1179,33 @@ function parseKaspiText(text) {
   const txns = [];
   let id = 1;
 
-  // Strategy 1: Kaspi format "HH:MM:SS   10 100 ₸"
+  // Strategy 1: Kaspi format "HH:MM:SS   10 100 ₸" или "HH:MM:SS   Возврат   - 22 500 ₸"
   // Amount may be split across PDF items, so collect digits/spaces before ₸
-  const re1 = /(\d{2}:\d{2}:\d{2})\s+([\d][\d\s]{0,12})(?:₸|тг|KZT)/gi;
+  const re1 = /(\d{2}:\d{2}:\d{2})\s+(Возврат\s+)?(-\s*)?([\d][\d\s]{0,12})(?:₸|тг|KZT)/gi;
   let m;
   while ((m = re1.exec(text)) !== null) {
     const time = m[1];
-    const amount = parseInt(m[2].replace(/\s/g,''), 10);
+    const isRefund = !!m[2] || !!m[3];
+    let amount = parseInt(m[4].replace(/\s/g,''), 10);
     if (!isNaN(amount) && amount >= 100 && amount <= 10000000) {
-      txns.push({id: id++, time, amount});
+      if (isRefund) amount = -amount;
+      txns.push({id: id++, time, amount, isRefund});
     }
   }
 
-  // Strategy 2: looser — find time, then scan next 40 chars for number before ₸
+  // Strategy 2: looser — find time, then scan next 60 chars for number before ₸
   if (!txns.length) {
     const re2 = /(\d{2}:\d{2}:\d{2})/g;
     while ((m = re2.exec(text)) !== null) {
       const time = m[1];
       const after = text.slice(m.index + 8, m.index + 60);
-      const numM = after.match(/([\d][\d\s]{0,12})(?:₸|тг|KZT)/i);
+      const numM = after.match(/(Возврат\s+)?(-\s*)?([\d][\d\s]{0,12})(?:₸|тг|KZT)/i);
       if (numM) {
-        const amount = parseInt(numM[1].replace(/\s/g,''), 10);
+        const isRefund = !!numM[1] || !!numM[2];
+        let amount = parseInt(numM[3].replace(/\s/g,''), 10);
         if (!isNaN(amount) && amount >= 100 && amount <= 10000000) {
-          txns.push({id: id++, time, amount});
+          if (isRefund) amount = -amount;
+          txns.push({id: id++, time, amount, isRefund});
         }
       }
     }
@@ -1208,11 +1213,15 @@ function parseKaspiText(text) {
 
   // Strategy 3: amounts formatted with comma "9 600,00 ₸"
   if (!txns.length) {
-    const re3 = /(\d{2}:\d{2}:\d{2})\D{0,50}?(\d[\d\s]*[,\.]\d{2})/g;
+    const re3 = /(\d{2}:\d{2}:\d{2})\D{0,50}?(Возврат\D{0,10})?(-\s*)?(\d[\d\s]*[,\.]\d{2})/g;
     while ((m = re3.exec(text)) !== null) {
       const time = m[1];
-      const amount = Math.round(parseFloat(m[2].replace(/\s/g,'').replace(',','.')));
-      if (!isNaN(amount) && amount >= 100) txns.push({id: id++, time, amount});
+      const isRefund = !!m[2] || !!m[3];
+      let amount = Math.round(parseFloat(m[4].replace(/\s/g,'').replace(',','.')));
+      if (!isNaN(amount) && amount >= 100) {
+        if (isRefund) amount = -amount;
+        txns.push({id: id++, time, amount, isRefund});
+      }
     }
   }
 
