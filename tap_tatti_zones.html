@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ТӘП-ТӘТТІ — Зоны доставки</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f4f4; }
+
+  #header {
+    background: #e63946;
+    color: white;
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    position: relative;
+    z-index: 1000;
+  }
+  #header h1 { font-size: 18px; font-weight: 700; }
+  #header .subtitle { font-size: 12px; opacity: 0.85; margin-top: 2px; }
+
+
+  #container { display: flex; height: calc(100vh - 56px); }
+
+  #sidebar {
+    width: 270px;
+    min-width: 270px;
+    background: white;
+    overflow-y: auto;
+    box-shadow: 2px 0 8px rgba(0,0,0,0.08);
+    z-index: 500;
+  }
+  #sidebar h2 {
+    font-size: 11px;
+    font-weight: 700;
+    color: #999;
+    padding: 12px 16px 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    border-bottom: 1px solid #eee;
+  }
+
+  .branch-item {
+    padding: 9px 14px;
+    border-bottom: 1px solid #f0f0f0;
+    cursor: pointer;
+    transition: background 0.12s;
+    display: flex;
+    align-items: flex-start;
+    gap: 9px;
+  }
+  .branch-item:hover { background: #fff5f5; }
+  .branch-item.active { background: #ffe8e8; border-left: 3px solid #e63946; padding-left: 11px; }
+
+  .bnum {
+    width: 22px; height: 22px; min-width: 22px;
+    background: #e63946; color: white;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; margin-top: 1px;
+  }
+  .bname { font-size: 13px; font-weight: 600; color: #222; line-height: 1.3; }
+  .baddr { font-size: 11px; color: #888; margin-top: 2px; line-height: 1.4; }
+  .bdistrict { font-size: 10.5px; color: #bbb; margin-top: 1px; }
+
+  /* Блок тарифов в сайдбаре */
+  .tariffs {
+    padding: 12px 14px;
+    border-top: 2px solid #f0f0f0;
+    margin-top: 4px;
+  }
+  .tariffs h2 { padding: 0 0 8px; }
+  .tariff-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 0;
+    border-bottom: 1px solid #f5f5f5;
+    font-size: 12px;
+  }
+  .tariff-dot {
+    width: 12px; height: 12px; min-width: 12px;
+    border-radius: 50%;
+  }
+  .tariff-label { color: #555; flex: 1; }
+  .tariff-price { font-weight: 700; color: #222; }
+  .tariff-free  { font-size: 10.5px; color: #888; margin-top: 1px; }
+
+  #map { flex: 1; }
+
+  .custom-marker {
+    background: #e63946; color: white;
+    border-radius: 50%;
+    width: 24px; height: 24px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: bold;
+    border: 2px solid white;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+  }
+
+  .legend {
+    background: white;
+    padding: 10px 14px;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    font-size: 12px;
+    line-height: 2;
+  }
+  .leg-line {
+    display: inline-block;
+    width: 20px; height: 3px;
+    vertical-align: middle;
+    margin-right: 6px;
+    border-radius: 2px;
+  }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <div>
+    <h1>🍰 ТӘП-ТӘТТІ — Алматы</h1>
+    <div class="subtitle">9 филиалов · зоны доставки</div>
+  </div>
+</div>
+
+<div id="container">
+  <div id="sidebar">
+    <h2>Филиалы</h2>
+    <div id="branch-list"></div>
+
+    <div class="tariffs">
+      <h2 style="font-size:11px;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:0.6px;padding-bottom:8px;">Тарифы доставки</h2>
+      <div class="tariff-row">
+        <div class="tariff-dot" style="background:#e63946;border:2px solid #e63946;"></div>
+        <div>
+          <div class="tariff-label">Зона 1 · до 2,5 км</div>
+          <div class="tariff-free">Бесплатно от 17 500 ₸</div>
+        </div>
+        <div class="tariff-price">1 750 ₸</div>
+      </div>
+    </div>
+  </div>
+  <div id="map"></div>
+</div>
+
+<script>
+const branches = [
+  { id:1, name:"Тимирязева",         addr:"ул. Тимирязева, 38/1",             district:"Бостандық",    lat:43.2258,    lng:76.9103    },
+  { id:2, name:"Сары Арка (4 мкр)",  addr:"4-й мкр, 28/1",                   district:"Әуезов",       lat:43.2297738, lng:76.8576855 },
+  { id:3, name:"Ади Шарипова",       addr:"ул. Ади Шарипова, 145, к.3",       district:"Алмалы",       lat:43.2439259, lng:76.9231341 },
+  { id:4, name:"Ньютона",            addr:"ул. Исаака Ньютона, 1А",           district:"Медеу",        lat:43.2333017, lng:76.9597579 },
+  { id:5, name:"Сатпаева",           addr:"ул. Каныша Сатпаева, 90/21",       district:"Бостандық",    lat:43.2318237, lng:76.8749177 },
+  { id:6, name:"Щепкина",            addr:"ул. Щепкина, 35Б",                 district:"Әуезов",       lat:43.2048868, lng:76.8767252 },
+  { id:7, name:"Райымбек батыра",    addr:"ул. Райымбек батыра, 168Б",        district:"Медеу / Бесагаш", lat:43.2923419, lng:77.0166334 },
+  { id:8, name:"Шұғыла",             addr:"мкр. Шұғыла, 340/35 к15",          district:"Наурызбай",    lat:43.2064654, lng:76.7897912 },
+  { id:9, name:"Алтын Орда (Алма City 5)", addr:"ул. Алтын Орда, 6/40а/к1",  district:"Наурызбай",    lat:43.2165091, lng:76.7757765 },
+];
+
+const map = L.map('map', { center: [43.238, 76.896], zoom: 11 });
+L.tileLayer('https://tile{s}.maps.2gis.com/tiles?x={x}&y={y}&z={z}&v=1',{
+  subdomains:['0','1','2','3'], attribution:'© 2ГИС', maxZoom:19
+}).addTo(map);
+
+const layers25 = [];
+const markers = [];
+
+branches.forEach(b => {
+  // Круг 2,5 км
+  const c25 = L.circle([b.lat, b.lng], {
+    radius: 2500,
+    color: '#e63946', weight: 2, opacity: 0.75,
+    fillColor: '#e63946', fillOpacity: 0.08
+  }).addTo(map);
+  layers25.push(c25);
+
+  // Маркер
+  const icon = L.divIcon({
+    className: '',
+    html: `<div class="custom-marker">${b.id}</div>`,
+    iconSize: [24, 24], iconAnchor: [12, 12], popupAnchor: [0, -14]
+  });
+  const m = L.marker([b.lat, b.lng], { icon }).addTo(map)
+    .bindPopup(`
+      <div style="font-family:'Segoe UI',Arial,sans-serif;min-width:190px">
+        <div style="font-weight:700;font-size:14px;color:#e63946;margin-bottom:5px">${b.id}. ${b.name}</div>
+        <div style="font-size:12px;color:#444;margin-bottom:2px">📍 ${b.addr}</div>
+        <div style="font-size:11px;color:#999;margin-bottom:8px">Район: ${b.district}</div>
+        <div style="background:#fff5f5;border-radius:6px;padding:6px 8px;font-size:11px">
+          <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+            <span style="color:#e63946">● до 2,5 км</span>
+            <span style="font-weight:700">1 750 ₸</span>
+          </div>
+          <div style="font-size:10px;color:#aaa;margin-bottom:6px">Бесплатно от 17 500 ₸</div>
+        </div>
+      </div>
+    `, { maxWidth: 250 });
+  m.on('click', () => highlightSidebar(b.id));
+  markers.push(m);
+});
+
+// Сайдбар
+const list = document.getElementById('branch-list');
+branches.forEach(b => {
+  const div = document.createElement('div');
+  div.className = 'branch-item';
+  div.id = `item-${b.id}`;
+  div.innerHTML = `
+    <div class="bnum">${b.id}</div>
+    <div>
+      <div class="bname">${b.name}</div>
+      <div class="baddr">${b.addr}</div>
+      <div class="bdistrict">${b.district}</div>
+    </div>`;
+  div.addEventListener('click', () => {
+    map.setView([b.lat, b.lng], 14, { animate: true });
+    markers[b.id-1].openPopup();
+    highlightSidebar(b.id);
+  });
+  list.appendChild(div);
+});
+
+function highlightSidebar(id) {
+  document.querySelectorAll('.branch-item').forEach(el => el.classList.remove('active'));
+  const el = document.getElementById(`item-${id}`);
+  if (el) { el.classList.add('active'); el.scrollIntoView({ block:'nearest' }); }
+}
+
+
+// Легенда
+const legend = L.control({ position: 'bottomright' });
+legend.onAdd = () => {
+  const d = document.createElement('div');
+  d.className = 'legend';
+  d.innerHTML = `
+    <b>Зоны доставки</b><br>
+    <span class="leg-line" style="background:#e63946"></span>до 2,5 км · 1 750 ₸<br>
+    <span style="font-size:10px;color:#aaa;margin-left:26px">бесплатно от 17 500 ₸</span><br>
+  `;
+  return d;
+};
+legend.addTo(map);
+
+// Автомасштаб
+map.fitBounds(branches.map(b => [b.lat, b.lng]), { padding: [50, 50] });
+</script>
+</body>
+</html>

@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ТӘП-ТӘТТІ · Калькулятор доставки</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Segoe UI',Arial,sans-serif; background:#f7f7f7; }
+
+/* ── HEADER ── */
+#header {
+  background:#e63946; color:white;
+  padding:12px 20px;
+  display:flex; align-items:center; gap:14px;
+  box-shadow:0 2px 10px rgba(0,0,0,0.2);
+  position:sticky; top:0; z-index:2000;
+}
+#header h1 { font-size:17px; font-weight:800; white-space:nowrap; }
+#header .sub { font-size:11px; opacity:0.8; }
+
+#search-wrap {
+  flex:1; display:flex; gap:8px; max-width:560px; position:relative;
+}
+#addr-input {
+  flex:1; padding:8px 13px;
+  border:2px solid rgba(255,255,255,0.35);
+  border-radius:8px; background:rgba(255,255,255,0.15);
+  color:white; font-size:13px; outline:none;
+}
+#addr-input::placeholder { color:rgba(255,255,255,0.6); }
+#addr-input:focus { border-color:white; background:rgba(255,255,255,0.22); }
+
+#search-btn {
+  padding:8px 16px; border-radius:8px;
+  background:white; color:#e63946;
+  font-size:13px; font-weight:700; border:none; cursor:pointer;
+  white-space:nowrap;
+}
+#search-btn:disabled { opacity:0.5; cursor:default; }
+
+#suggestions {
+  position:absolute; top:42px; left:0; right:72px;
+  background:white; border-radius:0 0 8px 8px;
+  box-shadow:0 6px 20px rgba(0,0,0,0.15);
+  z-index:3000; display:none; max-height:220px; overflow-y:auto;
+}
+.sug-item {
+  padding:9px 14px; font-size:13px; cursor:pointer;
+  border-bottom:1px solid #f0f0f0; color:#333;
+}
+.sug-item:hover { background:#fff5f5; color:#e63946; }
+
+/* ── DESKTOP LAYOUT ── */
+#main { display:flex; height:calc(100vh - 52px); }
+
+#panel {
+  width:320px; min-width:320px; background:white;
+  overflow-y:auto; box-shadow:2px 0 10px rgba(0,0,0,0.07);
+  z-index:100; display:flex; flex-direction:column;
+}
+
+#dest-card {
+  padding:12px 14px;
+  background:#fff8f8; border-bottom:2px solid #eee;
+  display:none;
+}
+#dest-card .dt { font-size:10px; color:#bbb; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:3px; }
+#dest-card .da { font-size:13px; font-weight:600; color:#333; line-height:1.4; }
+
+#empty-state {
+  flex:1; display:flex; flex-direction:column;
+  align-items:center; justify-content:center;
+  padding:28px; text-align:center; color:#ccc; gap:8px;
+}
+#empty-state .eicon { font-size:44px; }
+#empty-state .etitle { font-size:14px; font-weight:600; color:#aaa; }
+#empty-state .esub { font-size:12px; line-height:1.6; }
+
+#results { display:none; flex-direction:column; }
+
+.r-header {
+  padding:9px 14px 5px;
+  font-size:10px; font-weight:700; color:#bbb;
+  text-transform:uppercase; letter-spacing:0.6px;
+  border-bottom:1px solid #eee;
+}
+
+.bc {
+  padding:9px 12px; border-bottom:1px solid #f2f2f2;
+  display:flex; align-items:center; gap:9px;
+  cursor:pointer; transition:background 0.1s; position:relative;
+}
+.bc:hover { background:#fafafa; }
+.bc.best { background:linear-gradient(135deg,#f0fdf4,#fff); border-left:4px solid #22c55e; }
+.bc.unavail { opacity:0.4; cursor:default; }
+
+.rnum {
+  width:24px; height:24px; min-width:24px; border-radius:50%;
+  display:flex; align-items:center; justify-content:center;
+  font-size:11px; font-weight:700; color:white;
+}
+.binfo { flex:1; min-width:0; }
+.bname { font-size:12px; font-weight:700; color:#222; }
+.baddr { font-size:11px; color:#aaa; margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.bdist { font-size:10.5px; color:#ccc; margin-top:1px; }
+.bprice { text-align:right; }
+.pval { font-size:14px; font-weight:800; }
+.pzone { font-size:10px; color:#bbb; margin-top:1px; }
+.pfree { font-size:10px; color:#16a34a; font-weight:600; margin-top:2px; }
+.best-tag {
+  position:absolute; top:5px; right:5px;
+  background:#22c55e; color:white;
+  font-size:9px; font-weight:700; padding:1px 5px; border-radius:8px;
+}
+
+#map-wrap { flex:1; position:relative; }
+#map { width:100%; height:100%; }
+
+#map-tip {
+  position:absolute; bottom:20px; left:50%; transform:translateX(-50%);
+  background:rgba(0,0,0,0.72); color:white;
+  padding:8px 16px; border-radius:20px; font-size:12px;
+  z-index:800; pointer-events:none; white-space:nowrap;
+  transition:opacity 0.5s;
+}
+
+.mk { background:#e63946; color:white; border-radius:50%;
+  width:24px; height:24px; display:flex; align-items:center; justify-content:center;
+  font-size:11px; font-weight:800; border:2px solid white;
+  box-shadow:0 2px 6px rgba(0,0,0,0.3); }
+
+/* ── MOBILE ── */
+@media (max-width:640px) {
+  #header {
+    padding:8px 12px;
+    flex-wrap:wrap;
+    gap:8px;
+  }
+  #header > div:first-child { display:flex; align-items:center; gap:8px; }
+  #header h1 { font-size:15px; }
+  #header .sub { display:none; }
+  #search-wrap { max-width:100%; width:100%; }
+  #suggestions { right:60px; top:40px; }
+
+  #main {
+    flex-direction:column;
+    height:calc(100vh - 72px);
+    position:relative;
+  }
+
+  /* Map fills everything */
+  #map-wrap { flex:1; height:100%; }
+
+  /* Panel becomes a bottom sheet */
+  #panel {
+    position:fixed;
+    bottom:0; left:0; right:0;
+    width:100%; min-width:unset;
+    max-height:70vh;
+    border-radius:18px 18px 0 0;
+    box-shadow:0 -4px 24px rgba(0,0,0,0.18);
+    z-index:600;
+    transform:translateY(100%);
+    transition:transform 0.35s cubic-bezier(.4,0,.2,1);
+    overflow-y:auto;
+    -webkit-overflow-scrolling:touch;
+  }
+  #panel.sheet-open { transform:translateY(0); }
+
+  /* Drag handle */
+  #sheet-handle {
+    display:flex; justify-content:center;
+    padding:10px 0 6px;
+    position:sticky; top:0; background:white; z-index:1;
+    cursor:pointer;
+  }
+  #sheet-handle::after {
+    content:'';
+    width:38px; height:4px;
+    background:#ddd; border-radius:2px;
+    display:block;
+  }
+
+  /* Bigger tap targets on mobile */
+  .bc { padding:12px 14px; gap:12px; }
+  .bname { font-size:13px; }
+  .baddr { font-size:12px; }
+  .bdist { font-size:11px; }
+  .pval { font-size:15px; }
+  .pfree { font-size:11px; }
+
+  #dest-card { padding:10px 14px; }
+  #dest-card .da { font-size:14px; }
+
+  /* Hide empty state on mobile */
+  #empty-state { display:none !important; }
+
+  #map-tip { font-size:11px; padding:7px 14px; bottom:10px; }
+}
+</style>
+</head>
+<body>
+
+<div id="header">
+  <div>
+    <h1>🍰 ТӘП-ТӘТТІ</h1>
+    <div class="sub">Калькулятор доставки</div>
+  </div>
+  <div id="search-wrap">
+    <input id="addr-input" type="text" placeholder="Поиск адреса… или кликните на карту" autocomplete="off"/>
+    <button id="search-btn" onclick="doSearch()">Найти</button>
+    <div id="suggestions"></div>
+  </div>
+</div>
+
+<div id="main">
+  <div id="panel">
+    <div id="sheet-handle" onclick="toggleSheet()"></div>
+    <div id="dest-card">
+      <div class="dt">📍 Адрес доставки</div>
+      <div class="da" id="dest-txt"></div>
+      <div style="font-size:10px;color:#bbb;margin-top:4px">✋ Потащите синий маркер для точной настройки</div>
+    </div>
+    <div id="empty-state">
+      <div class="eicon">🗺️</div>
+      <div class="etitle">Выберите точку доставки</div>
+      <div class="esub">Кликните в любое место<br>на карте — или введите<br>адрес в строке поиска</div>
+    </div>
+    <div id="results"></div>
+  </div>
+  <div id="map-wrap">
+    <div id="map"></div>
+    <div id="map-tip">👆 Кликните на карту чтобы выбрать адрес доставки</div>
+  </div>
+</div>
+
+<script>
+const BRANCHES = [
+  {id:1,name:"Тимирязева",      addr:"ул. Тимирязева, 38/1",       dist:"Бостандық",      lat:43.2258,    lng:76.9103   },
+  {id:2,name:"Сары Арка",       addr:"4-й мкр, 28/1",              dist:"Әуезов",          lat:43.2297738, lng:76.8576855},
+  {id:3,name:"Ади Шарипова",    addr:"ул. Ади Шарипова, 145 к.3",  dist:"Алмалы",          lat:43.2439259, lng:76.9231341},
+  {id:4,name:"Ньютона",         addr:"ул. Исаака Ньютона, 1А",     dist:"Медеу",           lat:43.2333017, lng:76.9597579},
+  {id:5,name:"Сатпаева",        addr:"ул. Каныша Сатпаева, 90/21", dist:"Бостандық",       lat:43.2318237, lng:76.8749177},
+  {id:6,name:"Щепкина",         addr:"ул. Щепкина, 35Б",           dist:"Әуезов",          lat:43.2048868, lng:76.8767252},
+  {id:7,name:"Райымбек батыра", addr:"ул. Райымбек батыра, 168Б",  dist:"Медеу/Бесагаш",  lat:43.2923419, lng:77.0166334},
+  {id:8,name:"Шұғыла",          addr:"мкр. Шұғыла, 340/35 к15",    dist:"Наурызбай",       lat:43.2064654, lng:76.7897912},
+  {id:9,name:"Алтын Орда",      addr:"ул. Алтын Орда, 6/40а/к1",   dist:"Наурызбай",       lat:43.2165091, lng:76.7757765},
+];
+
+const ZONES=[
+  [1000,"до 1 км",    1462.68,14627],
+  [1500,"1–1,5 км",   1560.55,15606],
+  [2000,"1,5–2 км",   1658.42,16584],
+  [2500,"2–2,5 км",   1756.29,17563],
+  [3000,"2,5–3 км",   1854.16,18542],
+  [3500,"3–3,5 км",   1952.03,19521],
+  [4000,"3,5–4 км",   2049.90,20499],
+  [4500,"4–4,5 км",   2147.77,21478],
+  [5000,"4,5–5 км",   2245.64,22456],
+  [5500,"5–5,5 км",   2490.36,24904],
+  [6000,"5,5–6 км",   2735.04,27350],
+  [6500,"6–6,5 км",   2979.74,29797],
+  [7000,"6,5–7 км",   3224.42,32244],
+];
+const RCOLS=["#16a34a","#22c55e","#84cc16","#eab308","#f97316","#ef4444","#dc2626","#991b1b","#6b21a8"];
+
+// MAP
+const map = L.map('map',{center:[43.238,76.896],zoom:12});
+// 2GIS tiles
+L.tileLayer('https://tile{s}.maps.2gis.com/tiles?x={x}&y={y}&z={z}&v=1',{
+  subdomains:['0','1','2','3'],
+  attribution:'© 2ГИС',
+  maxZoom:19
+}).addTo(map);
+
+const bMarkers={};
+const routeLines=[];
+let destMarker=null;
+
+BRANCHES.forEach(b=>{
+  const icon=L.divIcon({className:'',html:`<div class="mk">${b.id}</div>`,iconSize:[24,24],iconAnchor:[12,12],popupAnchor:[0,-14]});
+  bMarkers[b.id]=L.marker([b.lat,b.lng],{icon}).addTo(map)
+    .bindPopup(`<b>${b.name}</b><br><small>${b.addr}</small>`);
+});
+
+// CLICK ON MAP
+map.on('click',e=>{
+  setDestination(e.latlng.lat, e.latlng.lng, `${e.latlng.lat.toFixed(5)}, ${e.latlng.lng.toFixed(5)}`);
+  // Reverse geocode to get label
+  reverseGeocode(e.latlng.lat, e.latlng.lng);
+});
+
+// Hide tip after first click
+map.once('click',()=>{
+  const tip=document.getElementById('map-tip');
+  tip.style.opacity='0';
+  setTimeout(()=>tip.style.display='none',500);
+});
+
+function calcAndRender(lat,lng){
+  routeLines.forEach(l=>map.removeLayer(l)); routeLines.length=0;
+
+  const res=BRANCHES.map(b=>{
+    const d=haversine(b.lat,b.lng,lat,lng);
+    return{...b,d,...getTariff(d)};
+  }).sort((a,b)=>{
+    if(a.ok&&!b.ok)return -1; if(!a.ok&&b.ok)return 1;
+    return a.price-b.price;
+  });
+
+  const best=res.find(r=>r.ok);
+  if(best){
+    routeLines.push(L.polyline([[best.lat,best.lng],[lat,lng]],
+      {color:'#22c55e',weight:2.5,dashArray:'6,5',opacity:0.85}).addTo(map));
+  }
+
+  const resEl=document.getElementById('results');
+  resEl.style.display='flex';
+  resEl.innerHTML=`<div class="r-header">Стоимость с каждого филиала</div>`;
+
+  res.forEach((b,i)=>{
+    const isBest=i===0&&b.ok;
+    const col=b.ok?RCOLS[Math.min(i,RCOLS.length-1)]:'#ccc';
+    const div=document.createElement('div');
+    div.className='bc'+(isBest?' best':'')+(b.ok?'':' unavail');
+    div.innerHTML=`
+      ${isBest?'<div class="best-tag">✓ ВЫГОДНЕЕ</div>':''}
+      <div class="rnum" style="background:${col}">${b.ok?i+1:'—'}</div>
+      <div class="binfo">
+        <div class="bname">${b.name}</div>
+        <div class="baddr">${b.addr}</div>
+        <div class="bdist">${fmtd(b.d)} · ${b.dist}</div>
+        ${b.ok?`<div class="pfree">Бесплатно от ${b.free.toLocaleString('ru-RU')} ₸</div>`:''}
+      </div>
+      <div class="bprice">
+        ${b.ok
+          ?`<div class="pval" style="color:${isBest?'#16a34a':'#222'}">${fmt(b.price)}</div>
+            <div class="pzone">${b.lbl}</div>`
+          :`<div style="font-size:11px;color:#ccc;font-weight:600">вне зон</div>
+            <div class="pzone">${fmtd(b.d)}</div>`}
+      </div>`;
+    if(b.ok) div.addEventListener('click',()=>{
+      map.setView([b.lat,b.lng],14,{animate:true});
+      bMarkers[b.id].openPopup();
+      routeLines.forEach(l=>map.removeLayer(l)); routeLines.length=0;
+      routeLines.push(L.polyline([[b.lat,b.lng],[lat,lng]],
+        {color:col,weight:2.5,dashArray:'6,5',opacity:0.8}).addTo(map));
+    });
+    resEl.appendChild(div);
+  });
+}
+
+function haversine(a,b,c,d){
+  const R=6371000,p=Math.PI/180;
+  const x=Math.sin((c-a)*p/2)**2+Math.cos(a*p)*Math.cos(c*p)*Math.sin((d-b)*p/2)**2;
+  return 2*R*Math.asin(Math.sqrt(x));
+}
+function getTariff(d){
+  for(const[r,lbl,price,free] of ZONES) if(d<=r) return{price,lbl,free,ok:true};
+  return{price:null,lbl:"вне зон",free:null,ok:false};
+}
+function fmt(p){ return p.toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2})+' ₸'; }
+function fmtd(d){ return d<1000?`${Math.round(d)} м`:`${(d/1000).toFixed(2)} км`; }
+
+function setDestination(lat,lng,label){
+  if(destMarker) map.removeLayer(destMarker);
+  routeLines.forEach(l=>map.removeLayer(l)); routeLines.length=0;
+
+  const dIcon=L.divIcon({className:'',
+    html:`<div style="background:#1d4ed8;color:white;border-radius:50% 50% 50% 0;transform:rotate(-45deg);width:30px;height:30px;display:flex;align-items:center;justify-content:center;border:2px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.4);cursor:grab"><span style="transform:rotate(45deg);font-size:14px">📍</span></div>`,
+    iconSize:[30,30],iconAnchor:[15,30]});
+  destMarker=L.marker([lat,lng],{icon:dIcon,zIndexOffset:1000,draggable:true}).addTo(map);
+
+  // Пересчёт при перетаскивании
+  destMarker.on('dragend', e=>{
+    const pos=e.target.getLatLng();
+    calcAndRender(pos.lat, pos.lng);
+    reverseGeocode(pos.lat, pos.lng);
+  });
+  destMarker.on('dragstart', ()=>{
+    routeLines.forEach(l=>map.removeLayer(l)); routeLines.length=0;
+  });
+
+  document.getElementById('dest-txt').textContent=label;
+  document.getElementById('dest-card').style.display='block';
+  document.getElementById('empty-state').style.display='none';
+
+  calcAndRender(lat, lng);
+  map.fitBounds([[lat,lng],...BRANCHES.map(b=>[b.lat,b.lng])],{padding:[50,50]});
+
+  // Открыть шторку на мобильном
+  if(window.innerWidth<=640){
+    document.getElementById('panel').classList.add('sheet-open');
+  }
+}
+
+function toggleSheet(){
+  if(window.innerWidth>640) return;
+  document.getElementById('panel').classList.toggle('sheet-open');
+}
+
+async function reverseGeocode(lat,lng){
+  try{
+    const url=`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&accept-language=ru`;
+    const r=await fetch(url);
+    const d=await r.json();
+    if(d.display_name){
+      const label=d.display_name.split(',').slice(0,3).join(',').trim();
+      document.getElementById('dest-txt').textContent=label;
+    }
+  }catch(e){}
+}
+
+// SEARCH
+const inp=document.getElementById('addr-input');
+const sugs=document.getElementById('suggestions');
+let sugTimer=null;
+
+inp.addEventListener('input',()=>{
+  clearTimeout(sugTimer);
+  const q=inp.value.trim();
+  if(q.length<3){sugs.style.display='none';return;}
+  sugTimer=setTimeout(()=>fetchSugs(q),450);
+});
+inp.addEventListener('keydown',e=>{ if(e.key==='Enter'){sugs.style.display='none';doSearch();} });
+document.addEventListener('click',e=>{ if(!e.target.closest('#search-wrap')) sugs.style.display='none'; });
+
+function cleanQ(q){
+  return q
+    .replace(/жк\s+\S+[,]?\s*/gi,'')
+    .replace(/блок\s*[\dА-Яа-яA-Za-z]+/gi,'')
+    .replace(/корп\w*\.?\s*[\dА-Яа-яA-Za-z]+/gi,'')
+    .replace(/кв\.?\s*\d+/gi,'')
+    .replace(/,\s*,/g,',').replace(/\s+/g,' ').trim().replace(/^[,\s]+|[,\s]+$/g,'');
+}
+
+// 2GIS Catalog API (Almaty city_id)
+const DGIS_KEY='f7be5030-a729-40a3-94e2-4dd38b1f8cdf';
+
+async function twogisFetch(q){
+  try{
+    // geocode endpoint — точный поиск по адресу (без city_id!)
+    const url=`https://catalog.api.2gis.com/3.0/items/geocode?q=${encodeURIComponent(q+', Алматы')}&fields=items.point,items.full_address_name&key=${DGIS_KEY}&locale=ru_KZ&limit=5`;
+    const r=await fetch(url);
+    const d=await r.json();
+    if(d.result&&d.result.items){
+      return d.result.items.filter(i=>i.point&&inAlmaty(i.point.lat,i.point.lon))
+        .map(i=>({lat:i.point.lat,lon:i.point.lon,display_name:i.full_address_name||i.name||q}));
+    }
+  }catch(e){}
+  return[];
+}
+
+// 2GIS Suggest API (autocomplete)
+async function twogisuggest(q){
+  try{
+    const url=`https://catalog.api.2gis.com/3.0/suggests?q=${encodeURIComponent(q)}&fields=items.point,items.full_name,items.full_address_name&city_id=4504222397425753&key=${DGIS_KEY}&locale=ru_KZ&limit=7`;
+    const r=await fetch(url);
+    const d=await r.json();
+    if(d.result&&d.result.items){
+      return d.result.items.filter(i=>i.point&&inAlmaty(i.point.lat,i.point.lon))
+        .map(i=>({lat:i.point.lat,lon:i.point.lon,display_name:i.full_address_name||i.full_name||i.name||q}));
+    }
+  }catch(e){}
+  return[];
+}
+
+// Nominatim fallback
+async function nominatimFetch(q){
+  try{
+    const url=`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q+', Алматы, Казахстан')}&format=json&limit=5&countrycodes=kz&accept-language=ru`;
+    const r=await fetch(url);
+    const data=await r.json();
+    return data.filter(d=>inAlmaty(parseFloat(d.lat),parseFloat(d.lon)))
+      .map(d=>({lat:parseFloat(d.lat),lon:parseFloat(d.lon),display_name:d.display_name}));
+  }catch(e){}
+  return[];
+}
+
+function inAlmaty(lat,lon){ return lon>=76.4&&lon<=77.5&&lat>=43.0&&lat<=43.6; }
+
+// Search: try 2GIS suggest → 2GIS catalog → Nominatim
+async function geoSearch(q){
+  const clean=cleanQ(q);
+  const variants=[clean, clean.split(',').slice(0,2).join(','), clean.split(',')[0]]
+    .filter((v,i,a)=>v&&a.indexOf(v)===i);
+  // 1. Try 2GIS suggest first (fastest, autocomplete-quality)
+  for(const qv of variants){
+    const res=await twogisuggest(qv);
+    if(res.length) return res;
+  }
+  // 2. Try 2GIS catalog
+  for(const qv of variants){
+    const res=await twogisFetch(qv);
+    if(res.length) return res;
+  }
+  // 3. Nominatim fallback
+  for(const qv of variants){
+    const res=await nominatimFetch(qv);
+    if(res.length) return res;
+  }
+  return[];
+}
+
+function featureLabel(d){
+  if(!d.display_name) return '';
+  return d.display_name.split(',').slice(0,3).join(',').trim();
+}
+
+async function fetchSugs(q){
+  try{
+    const results=await geoSearch(q);
+    if(!results.length){sugs.style.display='none';return;}
+    sugs.innerHTML=results.slice(0,6).map(d=>{
+      const lbl=featureLabel(d)||d.display_name;
+      return`<div class="sug-item" data-lat="${d.lat}" data-lon="${d.lon}" data-name="${lbl}">${lbl}</div>`;
+    }).join('');
+    sugs.style.display='block';
+    sugs.querySelectorAll('.sug-item').forEach(el=>el.addEventListener('click',()=>{
+      inp.value=el.dataset.name;
+      sugs.style.display='none';
+      setDestination(+el.dataset.lat,+el.dataset.lon,el.dataset.name);
+    }));
+  }catch(e){}
+}
+
+async function doSearch(){
+  const q=inp.value.trim(); if(!q) return;
+  sugs.style.display='none';
+  const btn=document.getElementById('search-btn');
+  btn.disabled=true; btn.textContent='...';
+  try{
+    const results=await geoSearch(q);
+    if(!results.length){ alert('Адрес не найден.\nПопробуйте: "Тургут Озала, 194" или кликните на карту'); return; }
+    const d=results[0];
+    setDestination(d.lat, d.lon, featureLabel(d)||d.display_name);
+  }catch(e){
+    alert('Ошибка: '+e.message+'\n\nИспользуйте клик по карте.');
+  }finally{
+    btn.disabled=false; btn.textContent='Найти';
+  }
+}
+</script>
+</body>
+</html>

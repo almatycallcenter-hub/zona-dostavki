@@ -1,0 +1,1501 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>ТӘП-ТӘТТІ</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+/* ══════════════════════════════
+   BASE
+══════════════════════════════ */
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Segoe UI',Arial,sans-serif; background:#f7f7f7; }
+
+/* ══════════════════════════════
+   BOTTOM TAB BAR
+══════════════════════════════ */
+#tab-bar {
+  position:fixed; bottom:0; left:0; right:0;
+  height:56px;
+  background:white;
+  border-top:2px solid #e63946;
+  display:flex;
+  z-index:9999;
+  box-shadow:0 -2px 12px rgba(0,0,0,0.1);
+}
+.tab-btn {
+  flex:1; border:none; background:transparent;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:2px; cursor:pointer; font-size:10px; color:#bbb;
+  font-family:inherit; transition:color 0.2s;
+}
+.tab-btn .ticon { font-size:22px; line-height:1; }
+.tab-btn.active { color:#e63946; font-weight:700; }
+
+/* ══════════════════════════════
+   VIEWS
+══════════════════════════════ */
+#view-calc    { display:block; }
+#view-catalog { display:none; }
+
+
+/* ══════════════════════════════
+   DELIVERY CALCULATOR
+══════════════════════════════ */
+#calc-header {
+  background:#e63946; color:white;
+  padding:12px 20px;
+  display:flex; align-items:center; gap:14px;
+  box-shadow:0 2px 10px rgba(0,0,0,0.2);
+  position:sticky; top:0; z-index:2000;
+}
+#calc-header h1 { font-size:17px; font-weight:800; white-space:nowrap; }
+#calc-header .sub { font-size:11px; opacity:0.8; }
+
+#search-wrap {
+  flex:1; display:flex; gap:8px; max-width:560px; position:relative;
+}
+#addr-input {
+  flex:1; padding:8px 13px;
+  border:2px solid rgba(255,255,255,0.35);
+  border-radius:8px; background:rgba(255,255,255,0.15);
+  color:white; font-size:13px; outline:none;
+}
+#addr-input::placeholder { color:rgba(255,255,255,0.6); }
+#addr-input:focus { border-color:white; background:rgba(255,255,255,0.22); }
+
+#search-btn {
+  padding:8px 16px; border-radius:8px;
+  background:white; color:#e63946;
+  font-size:13px; font-weight:700; border:none; cursor:pointer;
+  white-space:nowrap;
+}
+#search-btn:disabled { opacity:0.5; cursor:default; }
+
+#suggestions {
+  position:absolute; top:42px; left:0; right:72px;
+  background:white; border-radius:0 0 8px 8px;
+  box-shadow:0 6px 20px rgba(0,0,0,0.15);
+  z-index:3000; display:none; max-height:220px; overflow-y:auto;
+}
+.sug-item {
+  padding:9px 14px; font-size:13px; cursor:pointer;
+  border-bottom:1px solid #f0f0f0; color:#333;
+}
+.sug-item:hover { background:#fff5f5; color:#e63946; }
+
+#calc-main { display:flex; height:calc(100vh - 52px - 56px); }
+
+#panel {
+  width:320px; min-width:320px; background:white;
+  overflow-y:auto; box-shadow:2px 0 10px rgba(0,0,0,0.07);
+  z-index:100; display:flex; flex-direction:column;
+}
+#dest-card {
+  padding:12px 14px; background:#fff8f8; border-bottom:2px solid #eee; display:none;
+}
+#dest-card .dt { font-size:10px; color:#bbb; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:3px; }
+#dest-card .da { font-size:13px; font-weight:600; color:#333; line-height:1.4; }
+
+#empty-state {
+  flex:1; display:flex; flex-direction:column;
+  align-items:center; justify-content:center;
+  padding:28px; text-align:center; color:#ccc; gap:8px;
+}
+#empty-state .eicon { font-size:44px; }
+#empty-state .etitle { font-size:14px; font-weight:600; color:#aaa; }
+#empty-state .esub { font-size:12px; line-height:1.6; }
+
+#results { display:none; flex-direction:column; }
+.r-header {
+  padding:9px 14px 5px; font-size:10px; font-weight:700; color:#bbb;
+  text-transform:uppercase; letter-spacing:0.6px; border-bottom:1px solid #eee;
+}
+.bc {
+  padding:9px 12px; border-bottom:1px solid #f2f2f2;
+  display:flex; align-items:center; gap:9px;
+  cursor:pointer; transition:background 0.1s; position:relative;
+}
+.bc:hover { background:#fafafa; }
+.bc.best { background:linear-gradient(135deg,#f0fdf4,#fff); border-left:4px solid #22c55e; }
+.bc.unavail { opacity:0.4; cursor:default; }
+.rnum {
+  width:24px; height:24px; min-width:24px; border-radius:50%;
+  display:flex; align-items:center; justify-content:center;
+  font-size:11px; font-weight:700; color:white;
+}
+.binfo { flex:1; min-width:0; }
+.bname { font-size:12px; font-weight:700; color:#222; }
+.baddr { font-size:11px; color:#aaa; margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.bdist { font-size:10.5px; color:#ccc; margin-top:1px; }
+.bprice { text-align:right; }
+.pval { font-size:14px; font-weight:800; }
+.pzone { font-size:10px; color:#bbb; margin-top:1px; }
+.pfree { font-size:10px; color:#16a34a; font-weight:600; margin-top:2px; }
+.best-tag {
+  position:absolute; top:5px; right:5px;
+  background:#22c55e; color:white;
+  font-size:9px; font-weight:700; padding:1px 5px; border-radius:8px;
+}
+#map-wrap { flex:1; position:relative; }
+#map { width:100%; height:100%; }
+#map-tip {
+  position:absolute; bottom:20px; left:50%; transform:translateX(-50%);
+  background:rgba(0,0,0,0.72); color:white;
+  padding:8px 16px; border-radius:20px; font-size:12px;
+  z-index:800; pointer-events:none; white-space:nowrap; transition:opacity 0.5s;
+}
+.mk { background:#e63946; color:white; border-radius:50%;
+  width:24px; height:24px; display:flex; align-items:center; justify-content:center;
+  font-size:11px; font-weight:800; border:2px solid white;
+  box-shadow:0 2px 6px rgba(0,0,0,0.3); }
+
+
+/* ══════════════════════════════
+   CATALOG (СОСТАВ)
+══════════════════════════════ */
+#view-catalog {
+  --bg:#1a1208; --surface:#241a0d; --card:#2e2010; --border:#4a3418;
+  --gold:#d4920a; --gold-light:#f0b429; --cream:#f5ecd4; --muted:#9a8060;
+  --text:#f0e6cc; --tag-bg:#3d2a0f; --radius:10px;
+  background:var(--bg); color:var(--text);
+  min-height:calc(100vh - 56px);
+  padding-bottom:72px;
+}
+#cat-header {
+  background:var(--surface); border-bottom:2px solid var(--gold);
+  padding:14px 20px 10px; position:sticky; top:0; z-index:100;
+}
+.cat-logo { font-size:18px; font-weight:800; color:var(--gold-light); margin-bottom:10px; }
+.cat-logo span { color:var(--cream); }
+#searchInput {
+  width:100%; padding:11px 16px; background:var(--card);
+  border:1.5px solid var(--border); border-radius:var(--radius);
+  color:var(--text); font-size:15px; outline:none; transition:border-color 0.2s;
+}
+#searchInput:focus { border-color:var(--gold); }
+#searchInput::placeholder { color:var(--muted); }
+.filters {
+  display:flex; gap:7px; overflow-x:auto; padding:10px 20px 0;
+  scrollbar-width:none; background:var(--bg);
+}
+.filters::-webkit-scrollbar { display:none; }
+.filter-btn {
+  padding:5px 13px; border-radius:20px; border:1.5px solid var(--border);
+  background:transparent; color:var(--muted); font-size:12px;
+  cursor:pointer; white-space:nowrap; transition:all 0.2s;
+}
+.filter-btn.active { background:var(--gold); border-color:var(--gold); color:#1a1208; font-weight:700; }
+.results-info { padding:10px 20px 0; font-size:12px; color:var(--muted); background:var(--bg); }
+.grid {
+  display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr));
+  gap:10px; padding:12px 20px 24px; background:var(--bg);
+}
+.card {
+  background:var(--card); border:1px solid var(--border); border-radius:var(--radius);
+  padding:12px; cursor:pointer; transition:border-color 0.2s, transform 0.15s;
+}
+.card:hover { border-color:var(--gold); transform:translateY(-1px); }
+.card.expanded { border-color:var(--gold); grid-column:1/-1; }
+.card-header { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
+.product-name { font-size:14px; font-weight:700; color:var(--cream); line-height:1.3; }
+.category-tag {
+  font-size:10px; padding:2px 7px; border-radius:10px;
+  background:var(--tag-bg); color:var(--gold); border:1px solid var(--border);
+  white-space:nowrap; flex-shrink:0;
+}
+.card-weight { font-size:12px; color:var(--gold-light); font-weight:600; margin-top:5px; }
+.card-dims { font-size:11px; color:var(--muted); margin-top:2px; }
+.shelf-badge {
+  display:inline-block; margin-top:5px; font-size:10px; padding:2px 7px;
+  border-radius:8px; background:#1a2e1a; color:#5cb85c; border:1px solid #2d6a2d;
+}
+.expand-btn { text-align:right; font-size:10px; color:var(--muted); margin-top:6px; }
+.card-detail {
+  display:none; margin-top:12px; border-top:1px solid var(--border);
+  padding-top:12px; grid-template-columns:1fr 1fr 1fr; gap:12px;
+}
+.card.expanded .card-detail { display:grid; }
+.detail-section h4 { font-size:10px; text-transform:uppercase; letter-spacing:0.7px; color:var(--muted); margin-bottom:4px; }
+.detail-section p { font-size:12px; color:var(--text); line-height:1.5; }
+.dims-grid { display:flex; gap:14px; flex-wrap:wrap; }
+.dim-item { text-align:center; }
+.dim-value { font-size:18px; font-weight:800; color:var(--gold-light); line-height:1; }
+.dim-label { font-size:9px; color:var(--muted); margin-top:2px; }
+.shelf-detail { font-size:13px; color:#5cb85c; font-weight:600; }
+.no-data { color:var(--muted); font-style:italic; }
+.no-results { text-align:center; padding:50px 20px; color:var(--muted); }
+.no-results .icon { font-size:40px; margin-bottom:10px; }
+
+
+/* ══════════════════════════════
+   KASPI (scoped to #view-kaspi)
+══════════════════════════════ */
+#view-kaspi {
+  --bg:#0F1729;--bg2:#141E35;--bg3:#1A2844;--border:#243358;
+  --accent:#6366F1;--accent2:#818CF8;--glow:rgba(99,102,241,0.15);
+  --green:#10B981;--gbg:rgba(16,185,129,0.1);
+  --yellow:#F59E0B;--ybg:rgba(245,158,11,0.1);
+  --red:#EF4444;--rbg:rgba(239,68,68,0.1);
+  --text:#E2E8F0;--text2:#94A3B8;--text3:#64748B;
+  --mono:'JetBrains Mono',monospace;
+  font-family:'Inter',sans-serif;
+  background:var(--bg); color:var(--text);
+  min-height:calc(100vh - 56px);
+}
+#view-kaspi .k-topbar{background:var(--bg2);border-bottom:1px solid var(--border);padding:0 20px;height:54px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:200;}
+#view-kaspi .k-logo{font-size:14px;font-weight:700;color:var(--accent2);}
+#view-kaspi .k-logo span{color:var(--text3);font-weight:400;}
+#view-kaspi .k-clock{font-family:var(--mono);font-size:13px;color:var(--accent2);}
+#view-kaspi .k-nav{background:var(--bg2);border-bottom:1px solid var(--border);padding:0 20px;display:flex;gap:2px;overflow-x:auto;}
+#view-kaspi .k-nav::-webkit-scrollbar{display:none;}
+#view-kaspi .k-nav-btn{padding:11px 14px;font-size:13px;font-weight:500;color:var(--text3);border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;white-space:nowrap;}
+#view-kaspi .k-nav-btn:hover{color:var(--text2);}
+#view-kaspi .k-nav-btn.active{color:var(--accent2);border-bottom-color:var(--accent);}
+#view-kaspi .k-main{padding:20px;max-width:1200px;margin:0 auto;padding-bottom:72px;}
+#view-kaspi .k-section{display:none;}
+#view-kaspi .k-section.active{display:block;}
+#view-kaspi .setup-banner{background:var(--ybg);border:1px solid var(--yellow);border-radius:10px;padding:14px 18px;margin-bottom:20px;display:flex;align-items:flex-start;gap:12px;}
+#view-kaspi .setup-steps{display:flex;flex-direction:column;gap:6px;margin-top:8px;}
+#view-kaspi .setup-step{display:flex;align-items:center;gap:8px;font-size:13px;}
+#view-kaspi .step-num{width:22px;height:22px;border-radius:50%;background:var(--yellow);color:#000;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+#view-kaspi .kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:20px;}
+#view-kaspi .kpi{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px 18px;}
+#view-kaspi .kpi.a{border-left:3px solid var(--accent);}
+#view-kaspi .kpi.g{border-left:3px solid var(--green);}
+#view-kaspi .kpi-label{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px;font-weight:600;}
+#view-kaspi .kpi-val{font-family:var(--mono);font-size:20px;font-weight:600;line-height:1;margin-bottom:3px;}
+#view-kaspi .kpi-sub{font-size:11px;color:var(--text3);}
+#view-kaspi .k-card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:18px;margin-bottom:14px;}
+#view-kaspi .card-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
+#view-kaspi .card-title{font-size:13px;font-weight:600;display:flex;align-items:center;gap:7px;}
+#view-kaspi .k-badge{font-size:11px;padding:3px 8px;border-radius:10px;font-weight:500;}
+#view-kaspi .bg{background:var(--gbg);color:var(--green);}
+#view-kaspi .by{background:var(--ybg);color:var(--yellow);}
+#view-kaspi .br{background:var(--rbg);color:var(--red);}
+#view-kaspi .ba{background:var(--glow);color:var(--accent2);}
+#view-kaspi .g2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;}
+@media(max-width:860px){#view-kaspi .g2{grid-template-columns:1fr;}}
+#view-kaspi .upload-zone{border:2px dashed var(--border);border-radius:10px;padding:32px;text-align:center;cursor:pointer;transition:all .2s;background:var(--bg2);}
+#view-kaspi .upload-zone:hover{border-color:var(--accent);background:var(--glow);}
+#view-kaspi .upload-zone.done{border-color:var(--green);background:var(--gbg);}
+#view-kaspi .txn-list{display:flex;flex-direction:column;gap:4px;max-height:480px;overflow-y:auto;}
+#view-kaspi .txn-list::-webkit-scrollbar{width:4px;}
+#view-kaspi .txn-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+#view-kaspi .txn-item{display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:7px;background:var(--bg3);cursor:pointer;transition:all .12s;border:1px solid transparent;user-select:none;}
+#view-kaspi .txn-item:hover{border-color:var(--border);}
+#view-kaspi .txn-item.prepay{background:rgba(99,102,241,.08);border-color:rgba(99,102,241,.3);}
+#view-kaspi .txn-item.daily{background:rgba(16,185,129,.06);border-color:rgba(16,185,129,.25);}
+#view-kaspi .chk{width:18px;height:18px;border-radius:50%;border:2px solid var(--border);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:10px;transition:all .12s;}
+#view-kaspi .txn-item.prepay .chk{border-color:var(--accent);background:var(--accent);color:#fff;}
+#view-kaspi .txn-item.daily .chk{border-color:var(--green);background:var(--green);color:#fff;}
+#view-kaspi .txn-time{font-family:var(--mono);font-size:12px;color:var(--text3);width:46px;flex-shrink:0;}
+#view-kaspi .txn-amt{font-family:var(--mono);font-size:13px;font-weight:600;flex-shrink:0;}
+#view-kaspi .txn-item.prepay .txn-amt{color:var(--accent2);}
+#view-kaspi .txn-item.daily .txn-amt{color:var(--green);}
+#view-kaspi .txn-item:not(.prepay):not(.daily) .txn-amt{color:var(--text2);}
+#view-kaspi .txn-tag{font-size:10px;font-weight:600;padding:2px 6px;border-radius:6px;flex-shrink:0;text-transform:uppercase;}
+#view-kaspi .tp{background:var(--glow);color:var(--accent2);}
+#view-kaspi .td{background:var(--gbg);color:var(--green);}
+#view-kaspi .tn{background:var(--bg);color:var(--text3);border:1px solid var(--border);}
+#view-kaspi .txn-note-in{background:none;border:none;outline:none;font-size:11px;color:var(--text3);font-family:'Inter',sans-serif;width:100%;}
+#view-kaspi .txn-note-in::placeholder{color:var(--text3);}
+#view-kaspi .sv-box{background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:14px;}
+#view-kaspi .sv-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid rgba(36,51,88,.5);}
+#view-kaspi .sv-row:last-child{border-bottom:none;}
+#view-kaspi .sv-label{font-size:13px;color:var(--text2);}
+#view-kaspi .sv-val{font-family:var(--mono);font-size:14px;font-weight:600;}
+#view-kaspi .sv-total .sv-label{font-weight:600;color:var(--text);font-size:14px;}
+#view-kaspi .sv-total .sv-val{font-size:17px;}
+#view-kaspi .k-status{border-radius:9px;padding:12px 16px;display:flex;align-items:center;gap:10px;margin-bottom:14px;}
+#view-kaspi .s-ok{background:var(--gbg);border:1px solid var(--green);}
+#view-kaspi .s-err{background:var(--rbg);border:1px solid var(--red);}
+#view-kaspi .s-warn{background:var(--ybg);border:1px solid var(--yellow);}
+#view-kaspi .s-icon{font-size:20px;}
+#view-kaspi .s-title{font-size:14px;font-weight:600;}
+#view-kaspi .s-sub{font-size:12px;margin-top:2px;opacity:.8;}
+#view-kaspi .fi{background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 11px;font-size:13px;color:var(--text);font-family:'Inter',sans-serif;outline:none;transition:border-color .15s;width:100%;}
+#view-kaspi .fi:focus{border-color:var(--accent);}
+#view-kaspi .fl{font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;display:block;}
+#view-kaspi .fg{display:flex;flex-direction:column;gap:3px;}
+#view-kaspi .k-btn{padding:8px 16px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;border:none;transition:opacity .15s;}
+#view-kaspi .btn-p{background:var(--accent);color:#fff;}
+#view-kaspi .btn-g{background:var(--green);color:#fff;}
+#view-kaspi .btn-o{background:none;border:1px solid var(--border);color:var(--text2);}
+#view-kaspi .btn-o:hover{border-color:var(--accent);color:var(--accent2);}
+#view-kaspi .k-legend{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;}
+#view-kaspi .leg{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);cursor:pointer;padding:5px 10px;border-radius:20px;border:1px solid var(--border);transition:all .15s;}
+#view-kaspi .leg:hover{border-color:var(--accent);}
+#view-kaspi .leg.active{border-color:var(--accent);color:var(--accent2);}
+#view-kaspi .dot{width:7px;height:7px;border-radius:50%;}
+#view-kaspi table{width:100%;border-collapse:collapse;}
+#view-kaspi thead th{text-align:left;font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.6px;font-weight:600;padding:7px 10px;border-bottom:1px solid var(--border);}
+#view-kaspi tbody tr{border-bottom:1px solid rgba(36,51,88,.4);}
+#view-kaspi tbody tr:last-child{border-bottom:none;}
+#view-kaspi tbody tr:hover{background:rgba(99,102,241,.04);}
+#view-kaspi td{padding:9px 10px;font-size:13px;}
+#view-kaspi td.mo{font-family:var(--mono);font-size:12px;}
+#view-kaspi .pp-item{background:var(--bg3);border-radius:8px;padding:11px;border-left:3px solid var(--accent);margin-bottom:8px;}
+#view-kaspi .pp-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;}
+#view-kaspi .k-div{height:1px;background:var(--border);margin:14px 0;}
+
+
+/* ══════════════════════════════
+   MOBILE
+══════════════════════════════ */
+@media (max-width:640px) {
+  #tab-bar { height:calc(56px + env(safe-area-inset-bottom)); padding-bottom:env(safe-area-inset-bottom); }
+
+  #calc-header { padding:8px 12px; flex-wrap:wrap; gap:8px; }
+  #calc-header > div:first-child { display:flex; align-items:center; gap:8px; }
+  #calc-header h1 { font-size:15px; }
+  #calc-header .sub { display:none; }
+  #search-wrap { max-width:100%; width:100%; }
+  #suggestions { right:60px; top:40px; }
+
+  /* Высота не зависит от точной высоты хедера — считается через flex, а не calc() */
+  #view-calc { display:flex; flex-direction:column; height:calc(100vh - 56px - env(safe-area-inset-bottom)); }
+  #calc-main { flex:1; min-height:0; height:auto; position:relative; flex-direction:column; }
+  #map-wrap { flex:1; height:100%; }
+
+  #panel {
+    position:fixed; bottom:calc(56px + env(safe-area-inset-bottom)); left:0; right:0;
+    width:100%; min-width:unset; max-height:65vh;
+    border-radius:18px 18px 0 0;
+    box-shadow:0 -4px 24px rgba(0,0,0,0.18);
+    z-index:600;
+    transform:translateY(100%);
+    transition:transform 0.35s cubic-bezier(.4,0,.2,1);
+    overflow-y:auto; -webkit-overflow-scrolling:touch;
+  }
+  #panel.sheet-open { transform:translateY(0); }
+
+  #sheet-handle {
+    display:flex; justify-content:center;
+    padding:10px 0 6px;
+    position:sticky; top:0; background:white; z-index:1; cursor:pointer;
+  }
+  #sheet-handle::after {
+    content:''; width:38px; height:4px;
+    background:#ddd; border-radius:2px; display:block;
+  }
+
+  .bc { padding:12px 14px; gap:12px; }
+  .bname { font-size:13px; }
+  .baddr { font-size:12px; }
+  .pval { font-size:15px; }
+  #dest-card .da { font-size:14px; }
+  #empty-state { display:none !important; }
+  #map-tip { font-size:11px; padding:7px 14px; bottom:10px; }
+
+  .grid { grid-template-columns:1fr; }
+  .card-detail { grid-template-columns:1fr; }
+
+  /* ── KASPI КАССА — мобильные тач-зоны ── */
+  #view-kaspi { padding-bottom:calc(56px + env(safe-area-inset-bottom)); }
+  #view-kaspi .k-main { padding:12px; padding-bottom:24px; }
+  #view-kaspi .k-card { padding:14px; }
+  #view-kaspi .kpi-row {
+    display:flex; overflow-x:auto; gap:10px; padding-bottom:4px;
+    grid-template-columns:unset; scrollbar-width:none; -webkit-overflow-scrolling:touch;
+  }
+  #view-kaspi .kpi-row::-webkit-scrollbar { display:none; }
+  #view-kaspi .kpi { min-width:140px; flex-shrink:0; }
+  #view-kaspi .txn-item { padding:12px; gap:12px; }
+  #view-kaspi .chk { width:24px; height:24px; font-size:12px; }
+  #view-kaspi .txn-amt { font-size:14px; }
+  #view-kaspi .txn-tag { font-size:11px; padding:3px 9px; }
+  #view-kaspi .leg { padding:6px 13px; font-size:12px; }
+  #view-kaspi .k-legend { flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; }
+  #view-kaspi .k-legend::-webkit-scrollbar { display:none; }
+}
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════
+     VIEW 1: DELIVERY CALCULATOR
+════════════════════════════ -->
+<div id="view-calc">
+  <div id="calc-header">
+    <div>
+      <h1>🍰 ТӘП-ТӘТТІ</h1>
+      <div class="sub">Калькулятор доставки</div>
+    </div>
+    <div id="search-wrap">
+      <input id="addr-input" type="text" placeholder="Поиск адреса… или кликните на карту" autocomplete="off"/>
+      <button id="search-btn" onclick="doSearch()">Найти</button>
+      <div id="suggestions"></div>
+    </div>
+  </div>
+
+  <div id="calc-main">
+    <div id="panel">
+      <div id="sheet-handle" onclick="toggleSheet()"></div>
+      <div id="dest-card">
+        <div class="dt">📍 Адрес доставки</div>
+        <div class="da" id="dest-txt"></div>
+        <div style="font-size:10px;color:#bbb;margin-top:4px">✋ Потащите синий маркер для точной настройки</div>
+      </div>
+      <div id="empty-state">
+        <div class="eicon">🗺️</div>
+        <div class="etitle">Выберите точку доставки</div>
+        <div class="esub">Кликните в любое место<br>на карте — или введите<br>адрес в строке поиска</div>
+      </div>
+      <div id="results"></div>
+    </div>
+    <div id="map-wrap">
+      <div id="map"></div>
+      <div id="map-tip">👆 Кликните на карту чтобы выбрать адрес доставки</div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════
+     VIEW 2: CATALOG
+════════════════════════════ -->
+<div id="view-catalog">
+  <div id="cat-header">
+    <div class="cat-logo">ТӘП-ТӘТТІ <span>Анықтамалық</span></div>
+    <input type="search" id="searchInput" placeholder="🔍 Өнім атауын теріңіз..." autocomplete="off">
+  </div>
+  <div class="filters" id="filters"></div>
+  <div class="results-info" id="resultsInfo"></div>
+  <div class="grid" id="grid"></div>
+</div>
+
+
+<!-- ═══════════════════════════
+     VIEW 3: KASPI KASSA
+════════════════════════════ -->
+<div id="view-kaspi" style="display:none">
+  <div class="k-topbar">
+    <div style="display:flex;align-items:center;gap:14px;">
+      <div class="k-logo">Тəп-Тəтті <span>/ Сверка кассы</span></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:16px;font-size:13px;color:var(--text2);">
+      <span id="kDateLabel">—</span>
+      <span class="k-clock" id="kClock">--:--:--</span>
+    </div>
+  </div>
+
+  <div class="k-nav">
+    <button class="k-nav-btn active" onclick="kaspiNav('kassa',this)">💳 Сверка кассы</button>
+    <button class="k-nav-btn" onclick="kaspiNav('history',this)">📋 История смен</button>
+    <button class="k-nav-btn" onclick="kaspiNav('settings',this)">⚙️ Настройки</button>
+  </div>
+
+  <div class="k-main">
+
+    <!-- ══ КАССА ══ -->
+    <div class="k-section active" id="tab-kassa">
+      <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fi').click()">
+        <div style="font-size:32px;margin-bottom:10px;">📄</div>
+        <div style="font-size:15px;font-weight:600;margin-bottom:6px;">Загрузить отчёт Каспи Пэй (PDF)</div>
+        <div style="font-size:13px;color:var(--text3);">Нажмите или перетащите файл</div>
+        <input type="file" id="fi" style="display:none" accept=".pdf">
+      </div>
+      <div style="text-align:center;margin:12px 0;">
+        <button class="k-btn btn-o" onclick="loadDemo()">⚡ Демо-отчёт (05.01.26 · 198 640 ₸)</button>
+      </div>
+
+      <div id="kassaMain" style="display:none;">
+        <div style="display:flex;gap:10px;align-items:flex-end;margin-bottom:18px;flex-wrap:wrap;">
+          <div class="fg"><label class="fl">Дата отчёта</label><input class="fi" style="width:160px;" type="date" id="rDate"></div>
+          <div class="fg"><label class="fl">Оператор</label>
+            <select class="fi" style="width:150px;" id="rOp">
+              <option>Мария К.</option><option>Анна П.</option>
+            </select>
+          </div>
+          <div class="fg"><label class="fl">Комментарий к смене</label><input class="fi" style="width:280px;" type="text" id="rComment" placeholder="Необязательно..."></div>
+        </div>
+
+        <div class="kpi-row">
+          <div class="kpi a"><div class="kpi-label">Итого Каспи</div><div class="kpi-val" id="kTotal">—</div><div class="kpi-sub" id="kTxn">— транзакций</div></div>
+          <div class="kpi g"><div class="kpi-label">Дневные заказы</div><div class="kpi-val" id="kDaily" style="color:var(--green)">0 ₸</div><div class="kpi-sub" id="kDailyN">0 шт</div></div>
+          <div class="kpi" style="border-left:3px solid var(--accent2)"><div class="kpi-label">Предоплаты</div><div class="kpi-val" id="kPrepay" style="color:var(--accent2)">0 ₸</div><div class="kpi-sub" id="kPrepayN">0 шт</div></div>
+          <div class="kpi" id="kDiffCard" style="border-left:3px solid var(--text3)"><div class="kpi-label">Расхождение</div><div class="kpi-val" id="kDiff" style="color:var(--text3)">—</div><div class="kpi-sub" id="kDiffSub">Не размечено</div></div>
+        </div>
+
+        <div class="k-status s-warn" id="statusBox">
+          <div class="s-icon">⚠️</div>
+          <div><div class="s-title">Разметьте транзакции</div><div class="s-sub">Клик = Предоплата → Дневной → сброс</div></div>
+        </div>
+
+        <div class="g2">
+          <div class="k-card" style="padding:14px;">
+            <div class="card-head">
+              <div class="card-title">📋 Транзакции Каспи Пэй</div>
+              <div style="display:flex;gap:6px;">
+                <button class="k-btn btn-o" style="padding:4px 9px;font-size:11px;" onclick="markAll('daily')">Все = дневные</button>
+                <button class="k-btn btn-o" style="padding:4px 9px;font-size:11px;" onclick="resetAll()">↺</button>
+              </div>
+            </div>
+            <div class="k-legend">
+              <div class="leg active" id="leg-all" onclick="setFilter('all',this)"><div class="dot" style="background:var(--accent2)"></div>Все</div>
+              <div class="leg" id="leg-prepay" onclick="setFilter('prepay',this)"><div class="dot" style="background:var(--accent2)"></div>Предоплаты</div>
+              <div class="leg" id="leg-daily" onclick="setFilter('daily',this)"><div class="dot" style="background:var(--green)"></div>Дневные</div>
+              <div class="leg" id="leg-none" onclick="setFilter('none',this)"><div class="dot" style="background:var(--text3)"></div>Не размечено</div>
+            </div>
+            <div class="txn-list" id="txnList"></div>
+          </div>
+
+          <div>
+            <div class="k-card">
+              <div class="card-head">
+                <div class="card-title">⚖️ Сверка кассы</div>
+                <span class="k-badge by" id="svBadge">В процессе</span>
+              </div>
+              <div class="sv-box">
+                <div class="sv-row"><div class="sv-label">💳 Каспи Пэй итого</div><div class="sv-val" id="sv-tot">—</div></div>
+                <div class="sv-row"><div class="sv-label">🟢 Дневные заказы</div><div class="sv-val" id="sv-day" style="color:var(--green)">0 ₸</div></div>
+                <div class="sv-row"><div class="sv-label">🔵 Предоплаты</div><div class="sv-val" id="sv-pre" style="color:var(--accent2)">0 ₸</div></div>
+                <div class="sv-row"><div class="sv-label">⬜ Не размечено</div><div class="sv-val" id="sv-un" style="color:var(--text3)">—</div></div>
+                <div class="k-div" style="margin:6px 0;"></div>
+                <div class="sv-row sv-total"><div class="sv-label">Расхождение</div><div class="sv-val" id="sv-diff" style="color:var(--text3)">—</div></div>
+              </div>
+              <div style="display:flex;gap:8px;margin-top:4px;">
+                <button class="k-btn btn-g" onclick="closeShift()" id="closeBtn" disabled style="opacity:.4;">✓ Закрыть смену и сохранить</button>
+              </div>
+              <div id="saveStatus" style="margin-top:8px;font-size:12px;color:var(--text3);"></div>
+            </div>
+
+            <div class="k-card">
+              <div class="card-head">
+                <div class="card-title">🔵 Детали предоплат</div>
+                <span class="k-badge ba" id="ppBadge">0 шт</span>
+              </div>
+              <div id="ppDetails">
+                <div style="text-align:center;padding:16px;color:var(--text3);font-size:13px;">Отметьте транзакции как «Предоплата»</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ ИСТОРИЯ ══ -->
+    <div class="k-section" id="tab-history">
+      <div class="k-card">
+        <div class="card-head">
+          <div class="card-title">📊 История смен</div>
+          <button class="k-btn btn-o" onclick="loadHistory()">↻ Обновить</button>
+        </div>
+        <div id="historyContent">
+          <div style="text-align:center;padding:32px;color:var(--text3);font-size:13px;">
+            Настройте Google Sheets в разделе ⚙️ Настройки, затем нажмите «Обновить»
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ НАСТРОЙКИ ══ -->
+    <div class="k-section" id="tab-settings">
+      <div class="k-card">
+        <div class="card-head">
+          <div class="card-title">⚙️ Подключение Google Sheets</div>
+          <span class="k-badge" id="connBadge" style="background:var(--ybg);color:var(--yellow);">Не настроено</span>
+        </div>
+        <div class="setup-banner" id="setupBanner">
+          <div style="font-size:20px;">📋</div>
+          <div style="flex:1;">
+            <div style="font-size:14px;font-weight:600;margin-bottom:8px;">Инструкция по настройке (5 шагов)</div>
+            <div class="setup-steps">
+              <div class="setup-step"><div class="step-num">1</div><span>Создайте новую Google Таблицу → скопируйте её ID из адресной строки</span></div>
+              <div class="setup-step"><div class="step-num">2</div><span>В таблице: Расширения → Apps Script → вставьте код из файла <b>google-apps-script.js</b></span></div>
+              <div class="setup-step"><div class="step-num">3</div><span>В скрипте замените <code style="background:var(--bg3);padding:1px 5px;border-radius:3px;">ВСТАВЬТЕ_ID_ТАБЛИЦЫ_СЮДА</code> на ID вашей таблицы</span></div>
+              <div class="setup-step"><div class="step-num">4</div><span>Нажмите «Развернуть» → Новое развертывание → Тип: Веб-приложение → Доступ: Все → Опубликовать</span></div>
+              <div class="setup-step"><div class="step-num">5</div><span>Скопируйте URL веб-приложения и вставьте ниже</span></div>
+            </div>
+          </div>
+        </div>
+        <div style="margin-top:16px;">
+          <div class="fg" style="margin-bottom:12px;">
+            <label class="fl">URL Google Apps Script (Web App URL)</label>
+            <div style="display:flex;gap:8px;">
+              <input class="fi" type="text" id="scriptUrl" placeholder="https://script.google.com/macros/s/АА.../exec" style="flex:1;">
+              <button class="k-btn btn-p" onclick="saveUrl()">Сохранить</button>
+              <button class="k-btn btn-o" onclick="testConn()">Проверить</button>
+            </div>
+          </div>
+          <div id="connResult" style="font-size:13px;margin-top:6px;"></div>
+        </div>
+        <div class="k-div"></div>
+        <div style="font-size:13px;font-weight:600;margin-bottom:10px;">Операторы</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <input class="fi" type="text" id="op1" placeholder="Оператор 1" style="width:180px;" value="Мария К.">
+          <input class="fi" type="text" id="op2" placeholder="Оператор 2" style="width:180px;" value="Анна П.">
+          <button class="k-btn btn-p" onclick="saveOps()">Сохранить операторов</button>
+        </div>
+      </div>
+      <div class="k-card">
+        <div class="card-head"><div class="card-title">ℹ️ Как работает хранение</div></div>
+        <div style="display:flex;flex-direction:column;gap:10px;font-size:13px;color:var(--text2);">
+          <div style="display:flex;gap:10px;align-items:flex-start;"><span style="font-size:18px;">📄</span><div><div style="font-weight:600;color:var(--text);">PDF Каспи Пэй</div>Загружаете отчёт → транзакции появляются списком</div></div>
+          <div style="display:flex;gap:10px;align-items:flex-start;"><span style="font-size:18px;">🖱</span><div><div style="font-weight:600;color:var(--text);">Разметка</div>Кликаете на каждую транзакцию: Предоплата или Дневной заказ</div></div>
+          <div style="display:flex;gap:10px;align-items:flex-start;"><span style="font-size:18px;">⚖️</span><div><div style="font-weight:600;color:var(--text);">Автосверка</div>Сумма Каспи = Дневные + Предоплаты. Расхождение = ошибка в разметке</div></div>
+          <div style="display:flex;gap:10px;align-items:flex-start;"><span style="font-size:18px;">☁️</span><div><div style="font-weight:600;color:var(--text);">Сохранение в Google Sheets</div>При закрытии смены данные уходят в 2 листа: «Смены» и «Транзакции»</div></div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /k-main -->
+</div>
+
+
+<!-- ═══════════════════════════
+     BOTTOM TAB BAR
+════════════════════════════ -->
+<div id="tab-bar">
+  <button class="tab-btn active" onclick="showTab('calc')" id="btn-calc">
+    <span class="ticon">🗺️</span>
+    Доставка
+  </button>
+  <button class="tab-btn" onclick="showTab('catalog')" id="btn-catalog">
+    <span class="ticon">🍰</span>
+    Өнімдер
+  </button>
+  <button class="tab-btn" onclick="showTab('kaspi')" id="btn-kaspi">
+    <span class="ticon">💳</span>
+    Kaspi
+  </button>
+  <button class="tab-btn" onclick="window.location.href='callcenter.html'" id="btn-cc">
+    <span class="ticon">💼</span>
+    Колл-центр
+  </button>
+</div>
+
+
+<script>
+/* ═══════════════════════
+   TAB SWITCHING
+═══════════════════════ */
+function showTab(tab) {
+  ['calc','catalog','kaspi'].forEach(t=>{
+    document.getElementById('view-'+t).style.display = t===tab ? 'block' : 'none';
+    document.getElementById('btn-'+t).classList.toggle('active', t===tab);
+  });
+  if(tab==='calc' && map) setTimeout(()=>map.invalidateSize(), 50);
+}
+
+
+/* ═══════════════════════
+   DELIVERY CALCULATOR
+═══════════════════════ */
+const BRANCHES = [
+  {id:1,name:"Тимирязева",      addr:"ул. Тимирязева, 38/1",       dist:"Бостандық",      lat:43.2258,    lng:76.9103   },
+  {id:2,name:"Сары Арка",       addr:"4-й мкр, 28/1",              dist:"Әуезов",          lat:43.2297738, lng:76.8576855},
+  {id:3,name:"Ади Шарипова",    addr:"ул. Ади Шарипова, 145 к.3",  dist:"Алмалы",          lat:43.2439259, lng:76.9231341},
+  {id:4,name:"Ньютона",         addr:"ул. Исаака Ньютона, 1А",     dist:"Медеу",           lat:43.2333017, lng:76.9597579},
+  {id:5,name:"Сатпаева",        addr:"ул. Каныша Сатпаева, 90/21", dist:"Бостандық",       lat:43.2318237, lng:76.8749177},
+  {id:6,name:"Щепкина",         addr:"ул. Щепкина, 35Б",           dist:"Әуезов",          lat:43.2048868, lng:76.8767252},
+  {id:7,name:"Райымбек батыра", addr:"ул. Райымбек батыра, 168Б",  dist:"Медеу/Бесагаш",  lat:43.2923419, lng:77.0166334},
+  {id:8,name:"Шұғыла",          addr:"мкр. Шұғыла, 340/35 к15",    dist:"Наурызбай",       lat:43.2064654, lng:76.7897912},
+  {id:9,name:"Алтын Орда",      addr:"ул. Алтын Орда, 6/40а/к1",   dist:"Наурызбай",       lat:43.2165091, lng:76.7757765},
+];
+const ZONES=[
+  [1000,"до 1 км",    1462.68,14627],
+  [1500,"1–1,5 км",   1560.55,15606],
+  [2000,"1,5–2 км",   1658.42,16584],
+  [2500,"2–2,5 км",   1756.29,17563],
+  [3000,"2,5–3 км",   1854.16,18542],
+  [3500,"3–3,5 км",   1952.03,19521],
+  [4000,"3,5–4 км",   2049.90,20499],
+  [4500,"4–4,5 км",   2147.77,21478],
+  [5000,"4,5–5 км",   2245.64,22456],
+  [5500,"5–5,5 км",   2490.36,24904],
+  [6000,"5,5–6 км",   2735.04,27350],
+  [6500,"6–6,5 км",   2979.74,29797],
+  [7000,"6,5–7 км",   3224.42,32244],
+];
+const RCOLS=["#16a34a","#22c55e","#84cc16","#eab308","#f97316","#ef4444","#dc2626","#991b1b","#6b21a8"];
+
+const map = L.map('map',{center:[43.238,76.896],zoom:12});
+L.tileLayer('https://tile{s}.maps.2gis.com/tiles?x={x}&y={y}&z={z}&v=1',{
+  subdomains:['0','1','2','3'], attribution:'© 2ГИС', maxZoom:19
+}).addTo(map);
+
+const bMarkers={};
+const routeLines=[];
+let destMarker=null;
+
+BRANCHES.forEach(b=>{
+  const icon=L.divIcon({className:'',html:`<div class="mk">${b.id}</div>`,iconSize:[24,24],iconAnchor:[12,12],popupAnchor:[0,-14]});
+  bMarkers[b.id]=L.marker([b.lat,b.lng],{icon}).addTo(map)
+    .bindPopup(`<b>${b.name}</b><br><small>${b.addr}</small>`);
+});
+
+map.on('click',e=>{
+  setDestination(e.latlng.lat, e.latlng.lng, `${e.latlng.lat.toFixed(5)}, ${e.latlng.lng.toFixed(5)}`);
+  reverseGeocode(e.latlng.lat, e.latlng.lng);
+});
+map.once('click',()=>{
+  const tip=document.getElementById('map-tip');
+  tip.style.opacity='0';
+  setTimeout(()=>tip.style.display='none',500);
+});
+
+function calcAndRender(lat,lng){
+  routeLines.forEach(l=>map.removeLayer(l)); routeLines.length=0;
+  const res=BRANCHES.map(b=>{
+    const d=haversine(b.lat,b.lng,lat,lng);
+    return{...b,d,...getTariff(d)};
+  }).sort((a,b)=>{
+    if(a.ok&&!b.ok)return -1; if(!a.ok&&b.ok)return 1;
+    return a.price-b.price;
+  });
+  const best=res.find(r=>r.ok);
+  if(best){
+    routeLines.push(L.polyline([[best.lat,best.lng],[lat,lng]],
+      {color:'#22c55e',weight:2.5,dashArray:'6,5',opacity:0.85}).addTo(map));
+  }
+  const resEl=document.getElementById('results');
+  resEl.style.display='flex';
+  resEl.innerHTML=`<div class="r-header">Стоимость с каждого филиала</div>`;
+  res.forEach((b,i)=>{
+    const isBest=i===0&&b.ok;
+    const col=b.ok?RCOLS[Math.min(i,RCOLS.length-1)]:'#ccc';
+    const div=document.createElement('div');
+    div.className='bc'+(isBest?' best':'')+(b.ok?'':' unavail');
+    div.innerHTML=`
+      ${isBest?'<div class="best-tag">✓ ВЫГОДНЕЕ</div>':''}
+      <div class="rnum" style="background:${col}">${b.ok?i+1:'—'}</div>
+      <div class="binfo">
+        <div class="bname">${b.name}</div>
+        <div class="baddr">${b.addr}</div>
+        <div class="bdist">${fmtd(b.d)} · ${b.dist}</div>
+        ${b.ok?`<div class="pfree">Бесплатно от ${b.free.toLocaleString('ru-RU')} ₸</div>`:''}
+      </div>
+      <div class="bprice">
+        ${b.ok
+          ?`<div class="pval" style="color:${isBest?'#16a34a':'#222'}">${fmt(b.price)}</div>
+            <div class="pzone">${b.lbl}</div>`
+          :`<div style="font-size:11px;color:#ccc;font-weight:600">вне зон</div>
+            <div class="pzone">${fmtd(b.d)}</div>`}
+      </div>`;
+    if(b.ok) div.addEventListener('click',()=>{
+      map.setView([b.lat,b.lng],14,{animate:true});
+      bMarkers[b.id].openPopup();
+      routeLines.forEach(l=>map.removeLayer(l)); routeLines.length=0;
+      routeLines.push(L.polyline([[b.lat,b.lng],[lat,lng]],
+        {color:col,weight:2.5,dashArray:'6,5',opacity:0.8}).addTo(map));
+    });
+    resEl.appendChild(div);
+  });
+}
+
+function haversine(a,b,c,d){
+  const R=6371000,p=Math.PI/180;
+  const x=Math.sin((c-a)*p/2)**2+Math.cos(a*p)*Math.cos(c*p)*Math.sin((d-b)*p/2)**2;
+  return 2*R*Math.asin(Math.sqrt(x));
+}
+function getTariff(d){
+  for(const[r,lbl,price,free] of ZONES) if(d<=r) return{price,lbl,free,ok:true};
+  return{price:null,lbl:"вне зон",free:null,ok:false};
+}
+function fmt(p){ return p.toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2})+' ₸'; }
+function fmtd(d){ return d<1000?`${Math.round(d)} м`:`${(d/1000).toFixed(2)} км`; }
+
+function setDestination(lat,lng,label){
+  if(destMarker) map.removeLayer(destMarker);
+  routeLines.forEach(l=>map.removeLayer(l)); routeLines.length=0;
+  const dIcon=L.divIcon({className:'',
+    html:`<div style="background:#1d4ed8;color:white;border-radius:50% 50% 50% 0;transform:rotate(-45deg);width:30px;height:30px;display:flex;align-items:center;justify-content:center;border:2px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.4);cursor:grab"><span style="transform:rotate(45deg);font-size:14px">📍</span></div>`,
+    iconSize:[30,30],iconAnchor:[15,30]});
+  destMarker=L.marker([lat,lng],{icon:dIcon,zIndexOffset:1000,draggable:true}).addTo(map);
+  destMarker.on('dragend',e=>{
+    const pos=e.target.getLatLng();
+    calcAndRender(pos.lat,pos.lng);
+    reverseGeocode(pos.lat,pos.lng);
+  });
+  destMarker.on('dragstart',()=>{ routeLines.forEach(l=>map.removeLayer(l)); routeLines.length=0; });
+  document.getElementById('dest-txt').textContent=label;
+  document.getElementById('dest-card').style.display='block';
+  document.getElementById('empty-state').style.display='none';
+  calcAndRender(lat,lng);
+  map.fitBounds([[lat,lng],...BRANCHES.map(b=>[b.lat,b.lng])],{padding:[50,50]});
+  if(window.innerWidth<=640) document.getElementById('panel').classList.add('sheet-open');
+}
+
+function toggleSheet(){
+  if(window.innerWidth>640) return;
+  document.getElementById('panel').classList.toggle('sheet-open');
+}
+
+async function reverseGeocode(lat,lng){
+  try{
+    const url=`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&accept-language=ru`;
+    const r=await fetch(url);
+    const d=await r.json();
+    if(d.display_name){
+      const label=d.display_name.split(',').slice(0,3).join(',').trim();
+      document.getElementById('dest-txt').textContent=label;
+    }
+  }catch(e){}
+}
+
+// SEARCH
+const inp=document.getElementById('addr-input');
+const sugs=document.getElementById('suggestions');
+let sugTimer=null;
+inp.addEventListener('input',()=>{
+  clearTimeout(sugTimer);
+  const q=inp.value.trim();
+  if(q.length<3){sugs.style.display='none';return;}
+  sugTimer=setTimeout(()=>fetchSugs(q),450);
+});
+inp.addEventListener('keydown',e=>{ if(e.key==='Enter'){sugs.style.display='none';doSearch();} });
+document.addEventListener('click',e=>{ if(!e.target.closest('#search-wrap')) sugs.style.display='none'; });
+
+function cleanQ(q){
+  return q
+    .replace(/жк\s+\S+[,]?\s*/gi,'')
+    .replace(/блок\s*[\dА-Яа-яA-Za-z]+/gi,'')
+    .replace(/корп\w*\.?\s*[\dА-Яа-яA-Za-z]+/gi,'')
+    .replace(/кв\.?\s*\d+/gi,'')
+    .replace(/,\s*,/g,',').replace(/\s+/g,' ').trim().replace(/^[,\s]+|[,\s]+$/g,'');
+}
+
+const DGIS_KEY='f7be5030-a729-40a3-94e2-4dd38b1f8cdf';
+
+async function twogisFetch(q){
+  try{
+    const url=`https://catalog.api.2gis.com/3.0/items/geocode?q=${encodeURIComponent(q+', Алматы')}&fields=items.point,items.full_address_name&key=${DGIS_KEY}&locale=ru_KZ&limit=5`;
+    const r=await fetch(url);
+    const d=await r.json();
+    if(d.result&&d.result.items){
+      return d.result.items.filter(i=>i.point&&inAlmaty(i.point.lat,i.point.lon))
+        .map(i=>({lat:i.point.lat,lon:i.point.lon,display_name:i.full_address_name||i.name||q}));
+    }
+  }catch(e){}
+  return[];
+}
+async function twogisuggest(q){
+  try{
+    const url=`https://catalog.api.2gis.com/3.0/suggests?q=${encodeURIComponent(q)}&fields=items.point,items.full_name,items.full_address_name&city_id=4504222397425753&key=${DGIS_KEY}&locale=ru_KZ&limit=7`;
+    const r=await fetch(url);
+    const d=await r.json();
+    if(d.result&&d.result.items){
+      return d.result.items.filter(i=>i.point&&inAlmaty(i.point.lat,i.point.lon))
+        .map(i=>({lat:i.point.lat,lon:i.point.lon,display_name:i.full_address_name||i.full_name||i.name||q}));
+    }
+  }catch(e){}
+  return[];
+}
+async function nominatimFetch(q){
+  try{
+    const url=`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q+', Алматы, Казахстан')}&format=json&limit=5&countrycodes=kz&accept-language=ru`;
+    const r=await fetch(url);
+    const data=await r.json();
+    return data.filter(d=>inAlmaty(parseFloat(d.lat),parseFloat(d.lon)))
+      .map(d=>({lat:parseFloat(d.lat),lon:parseFloat(d.lon),display_name:d.display_name}));
+  }catch(e){}
+  return[];
+}
+function inAlmaty(lat,lon){ return lon>=76.4&&lon<=77.5&&lat>=43.0&&lat<=43.6; }
+
+async function geoSearch(q){
+  const clean=cleanQ(q);
+  const variants=[clean, clean.split(',').slice(0,2).join(','), clean.split(',')[0]]
+    .filter((v,i,a)=>v&&a.indexOf(v)===i);
+  for(const qv of variants){ const r=await twogisuggest(qv); if(r.length) return r; }
+  for(const qv of variants){ const r=await twogisFetch(qv); if(r.length) return r; }
+  for(const qv of variants){ const r=await nominatimFetch(qv); if(r.length) return r; }
+  return[];
+}
+function featureLabel(d){
+  if(!d.display_name) return '';
+  return d.display_name.split(',').slice(0,3).join(',').trim();
+}
+async function fetchSugs(q){
+  try{
+    const results=await geoSearch(q);
+    if(!results.length){sugs.style.display='none';return;}
+    sugs.innerHTML=results.slice(0,6).map(d=>{
+      const lbl=featureLabel(d)||d.display_name;
+      return`<div class="sug-item" data-lat="${d.lat}" data-lon="${d.lon}" data-name="${lbl}">${lbl}</div>`;
+    }).join('');
+    sugs.style.display='block';
+    sugs.querySelectorAll('.sug-item').forEach(el=>el.addEventListener('click',()=>{
+      inp.value=el.dataset.name;
+      sugs.style.display='none';
+      setDestination(+el.dataset.lat,+el.dataset.lon,el.dataset.name);
+    }));
+  }catch(e){}
+}
+async function doSearch(){
+  const q=inp.value.trim(); if(!q) return;
+  sugs.style.display='none';
+  const btn=document.getElementById('search-btn');
+  btn.disabled=true; btn.textContent='...';
+  try{
+    const results=await geoSearch(q);
+    if(!results.length){ alert('Адрес не найден. Попробуйте кликнуть на карту'); return; }
+    const d=results[0];
+    setDestination(d.lat,d.lon,featureLabel(d)||d.display_name);
+  }catch(e){
+    alert('Ошибка: '+e.message);
+  }finally{
+    btn.disabled=false; btn.textContent='Найти';
+  }
+}
+
+
+/* ═══════════════════════
+   CATALOG
+═══════════════════════ */
+const products = [
+  {name:"Самса етпен «Дастархан»", cat:"Самса", weight:"60±5 гр", dims:{ұзындығы:"9±1",ені:"8±1",биіктігі:"3±0,5"}, ingr:"Ұн, су, тұз, маргарин. Ет, пияз, күнбағыс майы, тұз, қара бұрыш, паприка. Безендіру: жұмыртқа және кунжут.", desc:"Слоеное тесто с начинкой из говяжьего фарша и лука.", shelf:"24 сағат, +15°C-тан жоғары емес"},
+  {name:"Самса тауықпен «Дастархан»", cat:"Самса", weight:"60±5 гр", dims:{ұзындығы:"9±1",ені:"8±1",биіктігі:"3±0,5"}, ingr:"Ұн, су, тұз, маргарин. Тауық еті, пияз, күнбағыс майы, тұз, қара бұрыш, паприка.", desc:"Слоеное тесто с начинкой из курицы и лука.", shelf:"24 сағат, +15°C-тан жоғары емес"},
+  {name:"Самса асқабақпен", cat:"Самса", weight:"60±5 гр", dims:{ұзындығы:"9±1",ені:"8±1",биіктігі:"3±0,5"}, ingr:"Ұн, су, тұз, маргарин. Асқабақ, картоп, пияз, күнбағыс майы, тұз, қара бұрыш, паприка.", shelf:"24 сағат, +15°C-тан жоғары емес"},
+  {name:"Шығыс самсасы етпен", cat:"Самса", weight:"60±5 гр", dims:{ұзындығы:"8±1",ені:"5,5±1",биіктігі:"3±0,3"}, ingr:"Ұн, сары май, маргарин, жұмыртқа, су, қаймақ, тұз. Ет, пияз, күнбағыс майы, тұз, қара бұрыш, паприка.", shelf:"24 сағат, +15°C-тан жоғары емес"},
+  {name:"Шығыс самсасы тауық етімен", cat:"Самса", weight:"60±5 гр", dims:{ұзындығы:"8±1",ені:"5,5±1",биіктігі:"3±0,3"}, ingr:"Ұн, сары май, маргарин, жұмыртқа, су, қаймақ, тұз. Тауық еті, пияз.", shelf:"24 сағат, +15°C-тан жоғары емес"},
+  {name:"Бөрек етпен", cat:"Бөрек", weight:"75±5 гр", dims:{ұзындығы:"16±1",ені:"3±1",биіктігі:"2±0,3"}, ingr:"Сдобное тесто. Ет, пияз, күнбағыс майы, тұз, қара бұрыш, паприка.", shelf:"24 сағат, +15°C-тан жоғары емес"},
+  {name:"Бөрек тауық етімен", cat:"Бөрек", weight:"75±5 гр", dims:{ұзындығы:"16±1",ені:"3±1",биіктігі:"2±0,3"}, ingr:"Сдобное тесто. Тауық еті, пияз.", shelf:"24 сағат, +15°C-тан жоғары емес"},
+  {name:"Бөрек картоппен", cat:"Бөрек", weight:"75±5 гр", dims:{ұзындығы:"16±1",ені:"3±1",биіктігі:"2±0,3"}, ingr:"Сдобное тесто. Картоп, пияз, сары май, тұз, қара бұрыш.", shelf:"24 сағат, +15°C-тан жоғары емес"},
+  {name:"Бөрек алмамен", cat:"Бөрек", weight:"75±5 гр", dims:{ұзындығы:"16±1",ені:"3±1",биіктігі:"2±0,3"}, ingr:"Сдобное тесто. Алма, қант, квелли, даршын.", shelf:"24 сағат, +15°C-тан жоғары емес"},
+  {name:"Бөрек паприка", cat:"Бөрек", weight:"75±5 гр", dims:{ұзындығы:"16±1",ені:"3±1",биіктігі:"2±0,3"}, ingr:"Сдобное тесто. Паприка, пияз, күнбағыс майы, тұз.", shelf:"24 сағат, +15°C-тан жоғары емес"},
+  {name:"Бөрек шпинат брынзамен", cat:"Бөрек", weight:"130±10 гр", dims:{ұзындығы:"9±1",ені:"8±1",биіктігі:"3±0,3"}, ingr:"Сдобное тесто. Шпинат, брынза, моцарелла, пияз, жұмыртқа, сүзбе.", shelf:"24 сағат, +15°C-тан жоғары емес"},
+  {name:"Сосиска в тесте", cat:"Тоқаш", weight:"150 гр", dims:{ұзындығы:"11±1",ені:"8±1",биіктігі:"5±0,5"}, desc:"Халяльный сосиска в дрожжевом тесте.", shelf:"24 сағат, +15°C-тан жоғары емес"},
+  {name:"Синнабон даршынмен (классикалық)", cat:"Тоқаш", weight:"150 гр", dims:{ұзындығы:"10±1",ені:"10±1",биіктігі:"4±1"}, desc:"Дрожжевое тесто, начинка из корицы и сырно-творожный глазурь.", shelf:"24 сағат, +15°C-тан жоғары емес"},
+  {name:"Синнабон жаңғақпен", cat:"Тоқаш", weight:"150 гр", dims:{ұзындығы:"10±1",ені:"10±1",биіктігі:"4±1"}, desc:"Дрожжевое тесто, начинка из грецкого ореха и сырно-творожный глазурь.", shelf:"24 сағат, +15°C-тан жоғары емес"},
+  {name:"Сүзбелі тоқаш", cat:"Тоқаш", weight:"80±5 гр", dims:{ұзындығы:"9±1",ені:"9±1",биіктігі:"5±0,5"}, ingr:"Ұн, қант, сары май, сүт, жұмыртқа, ашытқы, тұз. Сүзбе, қант, жұмыртқа, ванилин.", shelf:"24 сағат, +15°C-тан жоғары емес"},
+  {name:"Сүзбелі құлпынайлы тоқаш", cat:"Тоқаш", weight:"80±5 гр", dims:{ұзындығы:"9±1",ені:"9±1",биіктігі:"5±0,5"}, ingr:"Ұн, қант, сары май, сүт, жұмыртқа, ашытқы, тұз. Сүзбе, құлпынай.", shelf:"24 сағат, +15°C-тан жоғары емес"},
+  {name:"Қалталы тоқаш шұжықпен", cat:"Тоқаш", weight:"120 гр", dims:{ұзындығы:"14±1",ені:"11±1",биіктігі:"4±0,5"}, desc:"Дрожжевое тесто с листьями салата, огурцами, помидорами, сыром и вареной колбасой.", shelf:"24 сағат, +15°C-тан жоғары емес"},
+  {name:"Қалталы тоқаш брынзамен", cat:"Тоқаш", weight:"120 гр", dims:{ұзындығы:"14±1",ені:"11±1",биіктігі:"4±0,5"}, desc:"Дрожжевое тесто с листьями салата, огурцами, помидорами и брынзой.", shelf:"24 сағат, +15°C-тан жоғары емес"},
+  {name:"Қатпарлы тоқаш алмамен", cat:"Тоқаш", weight:"115±10 гр", dims:{ұзындығы:"16±1",ені:"8±1",биіктігі:"4±0,5"}, ingr:"Ұн, сүт, қант, сары май, ашытқы, тұз. Алма, қант, корица.", shelf:"24 сағат, +15°C-тан жоғары емес"},
+  {name:"Қатпарлы сүзбелі тоқаш", cat:"Тоқаш", weight:"115±10 гр", dims:{ұзындығы:"11±1",ені:"8±1",биіктігі:"4±0,5"}, ingr:"Ұн, сүт, қант, сары май, ашытқы, тұз. Сүзбе, қант, жұмыртқа, ванилин.", shelf:"24 сағат, +15°C-тан жоғары емес"},
+  {name:"Көкнәр қосылған тоқаш", cat:"Тоқаш", weight:"80±5 гр", dims:{ұзындығы:"9±1",ені:"9±1",биіктігі:"5±0,5"}, shelf:"24 сағат, +15°C-тан жоғары емес"},
+  {name:"Бауырсақ", cat:"Тоқаш", weight:"весовые", dims:{}, desc:"Дрожжевое тесто обжаренное на масле.", shelf:"24 сағат, +15°C-тан жоғары емес"},
+  {name:"Учпучмак", cat:"Тоқаш", weight:"110 гр", dims:{}, desc:"Дрожжевое тесто с говяжьим фаршем, картошкой и луком.", shelf:"24 сағат, +15°C-тан жоғары емес"},
+  {name:"Ірімшік ж/е картоп қосылған рогалик", cat:"Тоқаш", weight:"весовые", dims:{}, desc:"Дрожжевое тесто с пюреобразной начинкой из сыра и картошки.", shelf:"24 сағат, +15°C-тан жоғары емес"},
+  {name:"Пирожок с капустой", cat:"Тоқаш", weight:"115 гр", dims:{}, shelf:"24 сағат, +15°C-тан жоғары емес"},
+  {name:"Пирожок с картошкой", cat:"Тоқаш", weight:"115 гр", dims:{}, shelf:"24 сағат, +15°C-тан жоғары емес"},
+  {name:"Пирожок с сыром", cat:"Тоқаш", weight:"115 гр", dims:{}, shelf:"24 сағат, +15°C-тан жоғары емес"},
+  {name:"Круассан 80 гр", cat:"Круассан", weight:"80 гр", dims:{ұзындығы:"11±1",ені:"10±1",биіктігі:"5±1"}, shelf:"24 сағат, +15°C-тан жоғары емес"},
+  {name:"Круассан шұжықпен", cat:"Круассан", weight:"110±10 гр", dims:{ұзындығы:"11±1",ені:"8±1",биіктігі:"4±1"}, shelf:"24 сағат, +15°C-тан жоғары емес"},
+  {name:"Круассан қоюылмамен", cat:"Круассан", weight:"125±20 гр", dims:{ұзындығы:"14±1",ені:"9±1",биіктігі:"6±1"}, shelf:"24 сағат, +15°C-тан жоғары емес"},
+  {name:"Шоколадты круассан", cat:"Круассан", weight:"120±20 гр", dims:{ұзындығы:"15±1",ені:"10±1",биіктігі:"7±1"}, shelf:"24 сағат, +15°C-тан жоғары емес"},
+  {name:"Красный бархат торт", cat:"Торт", weight:"1200-1300 гр", dims:{диаметрі:"20",биіктігі:"8-8,5"}, desc:"Четыре влажных пористых бисквита, прослоенных кремом из творожного сыра и натуральных сливок.", shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Whoopie Pie торт", cat:"Торт", weight:"1400 гр", dims:{диаметрі:"20",биіктігі:"8-9"}, desc:"Три насыщенных шоколадных бисквита, пропитанных нежным сливочно-сырным кремом.", shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Молочная девочка торт", cat:"Торт", weight:"1100 гр", dims:{диаметрі:"20",биіктігі:"5-6"}, desc:"Шесть тонких коржей на основе сгущенного молока. Крем из творожного сыра и сливок.", shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Балды торт (Медовый)", cat:"Торт", weight:"1200 гр", dims:{диаметрі:"20",биіктігі:"5-6"}, desc:"Шесть медовых коржей, пропитанных кремом пломбир.", shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Морковный торт", cat:"Торт", weight:"1400 гр", dims:{диаметрі:"20",биіктігі:"8-9"}, desc:"Три сочных бисквита с тертой морковью, грецким орехом и нежным творожным кремом.", shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Шпинатный торт", cat:"Торт", weight:"1300 гр", dims:{диаметрі:"20",биіктігі:"7,5-8"}, desc:"Три влажных бисквита с натуральным шпинатом и кофейной пропиткой.", shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Сникерс торт", cat:"Торт", weight:"1250-1300 гр", dims:{диаметрі:"20",биіктігі:"7,5-8"}, desc:"Три шоколадных бисквита с кремом из творожного сыра, карамелью и жареным арахисом.", shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Тирамису классик", cat:"Торт", weight:"1000-1050 гр", dims:{диаметрі:"20",биіктігі:"7-7,5"}, desc:"Два нежных бисквита со сливочным кремом и лёгкой кофейной ноткой.", shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Тирамису фундук торт", cat:"Торт", weight:"1100 гр", dims:{диаметрі:"20",биіктігі:"7-7,5"}, desc:"2 слоя бисквита с кофейным сиропом, крем из творожного сыра со вкусом фундука.", shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Тирамису шоколадты торт", cat:"Торт", weight:"1100-1150 гр", dims:{диаметрі:"20",биіктігі:"7-7,5"}, desc:"2 слоя шоколадного бисквита с кофейным сиропом и шоколадным кремом из творожного сыра.", shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Чизкейк Нью-Йорк", cat:"Торт", weight:"850-900 гр", dims:{диаметрі:"18",биіктігі:"4-4,5"}, desc:"Тонкая песочная основа, творожно-сырная начинка, сверху ягодный гель (малина).", shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Карамельді Чизкейк", cat:"Торт", weight:"1040 гр", dims:{диаметрі:"19",биіктігі:"4-4,5"}, desc:"Песочная основа, творожно-сырная начинка с карамелью и арахисом.", shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Испанский чизкейк", cat:"Торт", weight:"1000 гр", dims:{диаметрі:"18",биіктігі:"6-7"}, desc:"Нежный испанский десерт из творожного сыра, натуральных сливок и яиц, сверху шоколадная заливка и миндальные хлопья.", shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Наполеон торт", cat:"Торт", weight:"1200-1300 гр", dims:{диаметрі:"20",биіктігі:"7-7,5"}, desc:"Торт из слоеных коржей с заварным кремом, натуральными сливками и сгущенным молоком.", shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Трилече торт", cat:"Торт", weight:"720-750 гр", dims:{диаметрі:"20",биіктігі:"4-4,5"}, desc:"«3 молока» — молоко, сливки и сгущенное молоко. Очень влажный бисквит с нежным карамельным вкусом.", shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Фисташкалы торт", cat:"Торт", weight:"1100-1150 гр", dims:{диаметрі:"19",биіктігі:"7-8"}, desc:"6 тонких коржей на сгущённом молоке с дроблёными фисташками, крем из творожного сыра.", shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Таңқурай нәзіктігі торты", cat:"Торт", weight:"—", dims:{диаметрі:"20",биіктігі:"7-8"}, desc:"Лёгкие молочные коржи, прослоенные воздушным кремом и натуральным малиновым конфитюром.", ingr:"натуральные сливки, творожный сыр, клубника, сахар, сгущённое молоко, мука в/с, яйца, малина, пищевой гель, сахарная пудра, квелли, разрыхлитель, желатин, пищевой краситель, ванилин, пищевая сода, соль.", shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Балхадиша торты", cat:"Торт", weight:"—", dims:{диаметрі:"20",биіктігі:"7-8"}, desc:"Нежный ароматный десерт из трёх видов бисквитов: с маком, шоколадный с какао, и с грецким орехом.", ingr:"натуральные сливки, творожный сыр, сахар, сметана, мука в/с, сахарная пудра, яйцо, грецкие орехи, мак, вафельная крошка, какао порошок, разрыхлитель.", shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Таңқурайлы торт", cat:"Торт", weight:"—", dims:{}, shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Шоколадты-бананды торт", cat:"Торт", weight:"—", dims:{}, shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Торт Микс №1", cat:"Торт", weight:"—", dims:{диаметрі:"20"}, desc:"4 түрлі торттың тілімдерінен тұрады: Вупипай, Красный бархат, Морковный, Шпинатный.", shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Торт Микс №2", cat:"Торт", weight:"—", dims:{диаметрі:"20"}, desc:"4 түрлі торттың тілімдерінен тұрады: Медовый, Молочная девочка, Сникерс, Тирамису классический.", shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Вупи пай торт (кіші)", cat:"Кіші торт", weight:"870±50 гр", dims:{диаметрі:"18",биіктігі:"6-7"}, shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Красный бархат торт (кіші)", cat:"Кіші торт", weight:"1000±50 гр", dims:{диаметрі:"18",биіктігі:"6-7"}, shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Молочная девочка торт (кіші)", cat:"Кіші торт", weight:"790±50 гр", dims:{диаметрі:"18",биіктігі:"5-6"}, shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Морковный торт (кіші)", cat:"Кіші торт", weight:"1020±70 гр", dims:{диаметрі:"18",биіктігі:"6-7"}, shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Сникерс торт (кіші)", cat:"Кіші торт", weight:"930±50 гр", dims:{диаметрі:"18",биіктігі:"6-7"}, shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Шпинатный торт (кіші)", cat:"Кіші торт", weight:"1135±80 гр", dims:{диаметрі:"18",биіктігі:"6-7"}, shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Құлпынайлы торт", cat:"Кіші торт", weight:"805±50 гр", dims:{диаметрі:"20",биіктігі:"6"}, shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Меренгалы рулет (қарақатпен)", cat:"Рулет", weight:"565±50 гр", dims:{ұзындығы:"25",ені:"8±1",биіктігі:"6±0,5"}, desc:"Безе с кремом из творожного сыра, сливок и чёрной смородины.", shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Меренгалы рулет (таңқураймен)", cat:"Рулет", weight:"565±50 гр", dims:{ұзындығы:"25",ені:"8±1",биіктігі:"6±0,5"}, desc:"Безе с кремом из творожного сыра, сливок и малины.", shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Таңқурайлы бенто торт", cat:"Бенто торт", weight:"395-410 гр", dims:{диаметрі:"10",биіктігі:"6-7"}, desc:"Нежный бисквит с малиновым конфи и сливочно-сырным кремом.", shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Шоколадты бенто торт", cat:"Бенто торт", weight:"395-410 гр", dims:{диаметрі:"10",биіктігі:"6-7"}, desc:"Шоколадный бисквит со сливочно-шоколадным кремом, украшенный клубникой.", shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Рафаэлло бенто торт", cat:"Бенто торт", weight:"395-410 гр", dims:{диаметрі:"10",биіктігі:"6-7"}, desc:"Творожно-сливочный крем с белым бельгийским шоколадом и кокосом.", shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Тирамису бенто торт", cat:"Бенто торт", weight:"260±20 гр", dims:{ұзындығы:"9",ені:"9",биіктігі:"5,5"}, shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Молочная бенто торт", cat:"Бенто торт", weight:"—", dims:{диаметрі:"10",биіктігі:"6-7"}, shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Балды торт (кусочек)", cat:"Торт тілімі", weight:"—", dims:{}, shelf:"48 сағат, +2°C — +6°C"},
+  {name:"Балхадиша торт (кусочек)", cat:"Торт тілімі", weight:"—", dims:{}, shelf:"48 сағат, +2°C — +6°C"},
+  {name:"Вупи пай торт (кусочек)", cat:"Торт тілімі", weight:"—", dims:{}, shelf:"48 сағат, +2°C — +6°C"},
+  {name:"Испанский чизкейк (кусочек)", cat:"Торт тілімі", weight:"—", dims:{}, shelf:"48 сағат, +2°C — +6°C"},
+  {name:"Карамельді чизкейк (кусочек)", cat:"Торт тілімі", weight:"—", dims:{}, shelf:"48 сағат, +2°C — +6°C"},
+  {name:"Красный бархат торт (кусочек)", cat:"Торт тілімі", weight:"—", dims:{}, shelf:"48 сағат, +2°C — +6°C"},
+  {name:"Меренга қарақатпен (кусочек)", cat:"Торт тілімі", weight:"—", dims:{}, shelf:"48 сағат, +2°C — +6°C"},
+  {name:"Меренга таңқурай (кусочек)", cat:"Торт тілімі", weight:"—", dims:{}, shelf:"48 сағат, +2°C — +6°C"},
+  {name:"Молочная девочка торт (кусочек)", cat:"Торт тілімі", weight:"—", dims:{}, shelf:"48 сағат, +2°C — +6°C"},
+  {name:"Морковный торт (кусочек)", cat:"Торт тілімі", weight:"—", dims:{}, shelf:"48 сағат, +2°C — +6°C"},
+  {name:"Наполеон торт (кусочек)", cat:"Торт тілімі", weight:"—", dims:{}, shelf:"48 сағат, +2°C — +6°C"},
+  {name:"Сникерс торт (кусочек)", cat:"Торт тілімі", weight:"—", dims:{}, shelf:"48 сағат, +2°C — +6°C"},
+  {name:"Таңқурайлы торт кусочек", cat:"Торт тілімі", weight:"—", dims:{}, shelf:"48 сағат, +2°C — +6°C"},
+  {name:"Тирамису торт (кусочек)", cat:"Торт тілімі", weight:"—", dims:{}, shelf:"48 сағат, +2°C — +6°C"},
+  {name:"Тирамису шоколадный (кусочек)", cat:"Торт тілімі", weight:"—", dims:{}, shelf:"48 сағат, +2°C — +6°C"},
+  {name:"Трилече торт (кусочек)", cat:"Торт тілімі", weight:"—", dims:{}, shelf:"48 сағат, +2°C — +6°C"},
+  {name:"Фисташковый торт (кусочек)", cat:"Торт тілімі", weight:"—", dims:{}, shelf:"48 сағат, +2°C — +6°C"},
+  {name:"Фундук тирамису торт (кусочек)", cat:"Торт тілімі", weight:"—", dims:{}, shelf:"48 сағат, +2°C — +6°C"},
+  {name:"Чизкейк Нью-Йорк (кусочек)", cat:"Торт тілімі", weight:"—", dims:{}, shelf:"48 сағат, +2°C — +6°C"},
+  {name:"Шпинатный торт (кусочек)", cat:"Торт тілімі", weight:"—", dims:{}, shelf:"48 сағат, +2°C — +6°C"},
+  {name:"Сүзбелі бәліш (үлкен)", cat:"Бәліш", weight:"850-900 гр", dims:{диаметрі:"22",биіктігі:"3-4"}, desc:"Основа из рассыпчатого песочного теста, начинка из нежного творога.", shelf:"48 сағат, +9°C-тан жоғары емес"},
+  {name:"Сүзбелі бәліш (кіші)", cat:"Бәліш", weight:"500-550 гр", dims:{диаметрі:"18",биіктігі:"3-4"}, desc:"Основа из рассыпчатого песочного теста, начинка из нежного творога.", shelf:"48 сағат, +9°C-тан жоғары емес"},
+  {name:"Банан тарталетка", cat:"Бәліш", weight:"500-550 гр", dims:{диаметрі:"18",биіктігі:"3-4"}, desc:"Свежие бананы, варёная карамель и взбитые сливки.", shelf:"48 сағат, +9°C-тан жоғары емес"},
+  {name:"Қарақыз бәліші", cat:"Бәліш", weight:"850-900 гр", dims:{диаметрі:"24",биіктігі:"3-4"}, desc:"Популярный отечественный пирог с шоколадной глазурью и посыпкой из фисташек.", shelf:"48 сағат, +9°C-тан жоғары емес"},
+  {name:"Фин алма бәліші", cat:"Бәліш", weight:"850-900 гр", dims:{диаметрі:"22",биіктігі:"3-4"}, desc:"Начинка из тёртых яблок на песочном тесте, украшен грецким орехом.", shelf:"48 сағат, +9°C-тан жоғары емес"},
+  {name:"Шығыс бәліші", cat:"Бәліш", weight:"500-550 гр", dims:{диаметрі:"18",биіктігі:"3-4"}, desc:"Песочное тесто с начинкой из сухофруктов, залитый сгущённым молоком.", shelf:"48 сағат, +9°C-тан жоғары емес"},
+  {name:"Сметанник", cat:"Бәліш", weight:"800-820 гр", dims:{диаметрі:"24",биіктігі:"3-4"}, desc:"Песочное тесто, залитое творожно-сметанной массой, обсыпанное сахарной пудрой.", shelf:"48 сағат, +9°C-тан жоғары емес"},
+  {name:"Алмалы бәліш (яблочный)", cat:"Бәліш", weight:"850-900 гр", dims:{диаметрі:"24",биіктігі:"3-4"}, desc:"Открытый пирог на песочном тесте с кусочками яблок, изюмом и грецким орехом.", shelf:"48 сағат, +9°C-тан жоғары емес"},
+  {name:"Жемісті бәліш (үлкен)", cat:"Бәліш", weight:"850-900 гр", dims:{диаметрі:"24",биіктігі:"3-4"}, desc:"Песочное тесто, украшенное взбитыми сливками и сезонными фруктами.", shelf:"48 сағат, +9°C-тан жоғары емес"},
+  {name:"Жемісті бәліш (кіші)", cat:"Бәліш", weight:"500-550 гр", dims:{диаметрі:"18",биіктігі:"3-4"}, desc:"Песочное тесто, украшенное взбитыми сливками и сезонными фруктами.", shelf:"48 сағат, +9°C-тан жоғары емес"},
+  {name:"Куриный пирог", cat:"Бәліш", weight:"1000 гр", dims:{диаметрі:"22",биіктігі:"3-4"}, desc:"Песочно-дрожжевое тесто с куриным филе, картошкой и луком.", shelf:"36 сағат, +12°C-тан жоғары емес"},
+  {name:"Мясной пирог", cat:"Бәліш", weight:"1000 гр", dims:{диаметрі:"22",биіктігі:"3-4"}, desc:"Песочно-дрожжевое тесто с говяжьим фаршем, картошкой и луком.", shelf:"36 сағат, +12°C-тан жоғары емес"},
+  {name:"Лимонды кекс (пирог)", cat:"Бәліш", weight:"900-950 гр", dims:{диаметрі:"22",биіктігі:"5-6"}, desc:"Бисквитное тесто с цедрой и соком лимона, украшенный лимонной помадкой.", shelf:"48 сағат, +9°C-тан жоғары емес"},
+  {name:"Бананды кіші тарт", cat:"Бәліш", weight:"500-550 гр", dims:{диаметрі:"18",биіктігі:"3-4"}, desc:"Нежнейшая тарталетка с бананами, варёной карамелью и натуральными взбитыми сливками.", shelf:"48 сағат, +9°C-тан жоғары емес"},
+  {name:"Бананды үлкен тарт", cat:"Бәліш", weight:"850-900 гр", dims:{диаметрі:"22",биіктігі:"3-4"}, desc:"Нежнейшая тарталетка с бананами, варёной карамелью и натуральными взбитыми сливками.", shelf:"48 сағат, +9°C-тан жоғары емес"},
+  {name:"Тары қосылған қаймақты бәліш", cat:"Бәліш", weight:"860±20 гр", dims:{диаметрі:"22±0,5",биіктігі:"3±0,5"}, ingr:"Сүзбелі ірімшік, қаймақ, ұн ж/с, жұмыртқа, сүт, қант ұнтағы, сары май, тары, қопсытқыш.", shelf:"48 сағат, +9°C-тан жоғары емес"},
+  {name:"Қаймақты бәліш", cat:"Бәліш", weight:"—", dims:{}, shelf:"48 сағат, +9°C-тан жоғары емес"},
+  {name:"Меренга қосылған көкнәрлі бәліш", cat:"Бәліш", weight:"—", dims:{}, shelf:"48 сағат, +9°C-тан жоғары емес"},
+  {name:"Орама бәліш Етпен", cat:"Бәліш", weight:"595±10 гр", dims:{диаметрі:"20±1",биіктігі:"3±1"}, ingr:"Ұн, сары май, маргарин, күнбағыс майы, су, қопсытқыш, тұз. Ет, пияз. Безендіру: жұмыртқа, ақ кунжут және қара кунжут.", shelf:"36 сағат, +12°C-тан жоғары емес"},
+  {name:"Орама бәліш Тауық етімен", cat:"Бәліш", weight:"595±10 гр", dims:{диаметрі:"20±1",биіктігі:"3±1"}, ingr:"Ұн, сары май, маргарин, күнбағыс майы, су, қопсытқыш, тұз. Тауық еті, пияз. Безендіру: жұмыртқа және кунжут.", shelf:"36 сағат, +12°C-тан жоғары емес"},
+  {name:"Алмалы даршын бәліші", cat:"Бәліш", weight:"870±50 гр", dims:{диаметрі:"20±1",биіктігі:"4±0,5"}, ingr:"Ұн, қант, сары май, жұмыртқа, маргарин. Алма, квелли, изюм, қант, корица.", shelf:"48 сағат, +9°C-тан жоғары емес"},
+  {name:"Сүзбелі-жидекті таңқурай бәліші", cat:"Бәліш", weight:"865±40 гр", dims:{диаметрі:"20±0,5",биіктігі:"4±0,5"}, ingr:"Ұн, қант, сары май, жұмыртқа, тұз. Сүзбе, жұмыртқа, қант, малина, крахмал, сүзбелі ірімшік.", shelf:"48 сағат, +9°C-тан жоғары емес"},
+  {name:"Тауық еттімен бәліш", cat:"Бәліш", weight:"1000±50 гр", dims:{ұзындығы:"22±1",биіктігі:"3±0,5"}, ingr:"Ұн, қант, маргарин, сүт, жұмыртқа, ашытқы, тұз. Тауық еті, пияз, картоп.", shelf:"36 сағат, +12°C-тан жоғары емес"},
+  {name:"Етті бәліш", cat:"Бәліш", weight:"1000±50 гр", dims:{ұзындығы:"22±1",биіктігі:"3±0,5"}, ingr:"Ұн, қант, маргарин, сүт, жұмыртқа, ашытқы, тұз. Ет, пияз, картоп.", shelf:"36 сағат, +12°C-тан жоғары емес"},
+  {name:"Десерт Павлова", cat:"Пирожное", weight:"95-100 гр", dims:{ұзындығы:"7±1",биіктігі:"6±1"}, desc:"Хрустящее безе с творожно-сливочным кремом, украшенный фисташками и клубникой.", shelf:"48 сағат, +2°C — +9°C"},
+  {name:"Капкейк ванильный", cat:"Пирожное", weight:"75-80 гр", dims:{ұзындығы:"6±0,5",биіктігі:"6±0,5"}, desc:"Бисквитное пирожное с кремом из творожного сыра и сливок.", shelf:"72 сағат, +2°C — +9°C"},
+  {name:"Шоколадты капкейк", cat:"Пирожное", weight:"120-125 гр", dims:{ұзындығы:"7±0,5",биіктігі:"9±0,5"}, desc:"Шоколадный бисквит с творожно-шоколадным кремом.", shelf:"72 сағат, +2°C — +9°C"},
+  {name:"Капкейк лимонный", cat:"Пирожное", weight:"100 гр", dims:{}, desc:"Лимонный бисквит с лимонной помадкой, взбитыми сливками и цедрой апельсина.", shelf:"72 сағат, +2°C — +9°C"},
+  {name:"Картошка пирожное", cat:"Пирожное", weight:"60 гр", dims:{}, desc:"Медовые коржи со сливочным маслом и какао.", shelf:"72 сағат, +2°C — +9°C"},
+  {name:"Трайфл-Милка", cat:"Пирожное", weight:"130-155 гр", dims:{ұзындығы:"9",биіктігі:"7"}, desc:"Шоколадный бисквит с творожно-сливочным кремом и растопленным бельгийским шоколадом.", shelf:"72 сағат, +2°C — +9°C"},
+  {name:"Трайфл Сникерс", cat:"Пирожное", weight:"100-115 гр", dims:{ұзындығы:"5,5",биіктігі:"7,5"}, desc:"Шоколадный бисквит с кремом, карамелью и арахисом.", shelf:"72 сағат, +2°C — +9°C"},
+  {name:"Шоколадты тарт", cat:"Пирожное", weight:"65-70 гр", dims:{ұзындығы:"7±0,5",биіктігі:"5±0,5"}, desc:"Песочное тесто с чистым бельгийским шоколадом и клубникой.", shelf:"72 сағат, +2°C — +9°C"},
+  {name:"Пирожное Шу", cat:"Пирожное", weight:"65-70 гр", dims:{ұзындығы:"6±1",биіктігі:"3±0,5"}, desc:"Заварное тесто с хрустящей корочкой, внутри заварной крем со сливками.", shelf:"72 сағат, +2°C — +9°C"},
+  {name:"Таңқурайлы шу", cat:"Пирожное", weight:"65-70 гр", dims:{ұзындығы:"6±1",биіктігі:"3±0,5"}, desc:"Заварное тесто с малиновым кремом.", shelf:"72 сағат, +2°C — +9°C"},
+  {name:"Ванильный эклер", cat:"Пирожное", weight:"65 гр", dims:{ұзындығы:"14±1",ені:"3±1",биіктігі:"2±1"}, desc:"Заварное тесто с заварным сливочным кремом, ванильной помадкой и фисташковой посыпкой.", shelf:"72 сағат, +2°C — +9°C"},
+  {name:"Эклер шоколадты", cat:"Пирожное", weight:"65 гр", dims:{ұзындығы:"14±1",ені:"3±1",биіктігі:"2±1"}, desc:"Заварное тесто с шоколадным кремом и арахисовыми слайсами.", shelf:"72 сағат, +2°C — +9°C"},
+  {name:"Эклер бананды", cat:"Пирожное", weight:"65 гр", dims:{ұзындығы:"14±1",ені:"3±1",биіктігі:"2±1"}, shelf:"72 сағат, +2°C — +9°C"},
+  {name:"Пирожное брауни", cat:"Пирожное", weight:"98±5 гр", dims:{ұзындығы:"8±1",ені:"4±1",биіктігі:"4±1"}, desc:"Шоколадный бисквит с кремом из творожного сыра и сливок.", shelf:"72 сағат, +2°C — +9°C"},
+  {name:"Пирожное сникерс", cat:"Пирожное", weight:"95±5 гр", dims:{ұзындығы:"8±1",ені:"4±1",биіктігі:"5±1"}, desc:"Шоколадный бисквит с арахисом, карамелью и шоколадом.", shelf:"72 сағат, +2°C — +9°C"},
+  {name:"Пирожное Мильфей", cat:"Пирожное", weight:"96±10 гр", dims:{ұзындығы:"10±1",ені:"4±1",биіктігі:"5±1"}, desc:"Слоеное тесто с заварным кремом и сгущенным молоком.", shelf:"72 сағат, +2°C — +9°C"},
+  {name:"Пирожное Эскимо", cat:"Пирожное", weight:"60±5 гр", dims:{ұзындығы:"7±0,5",ені:"4±0,5"}, shelf:"72 сағат, +2°C — +9°C"},
+  {name:"Миньон Эскимо", cat:"Пирожное", weight:"60±5 гр", dims:{ұзындығы:"7±0,5",ені:"4±0,5"}, shelf:"72 сағат, +2°C — +9°C"},
+  {name:"Блины с творогом", cat:"Пирожное", weight:"60-65 гр", dims:{}, desc:"Тонкий блин на молоке и воде, с творожно-сметанной начинкой.", shelf:"36 сағат, +2°C — +9°C"},
+  {name:"Муравейник", cat:"Пирожное", weight:"155 гр", dims:{}, desc:"Песочное тесто со сгущенкой, грецким орехом и маком.", shelf:"72 сағат, +2°C — +9°C"},
+  {name:"Алмалы кекс", cat:"Пирожное", weight:"80 гр", dims:{}, desc:"Нежный ванильный бисквит с кусочками яблока.", shelf:"72 сағат, +2°C — +9°C"},
+  {name:"Шоколадный маффин", cat:"Пирожное", weight:"95-100 гр", dims:{}, desc:"Нежный шоколадный бисквит с шоколадной глазурью.", shelf:"72 сағат, +2°C — +9°C"},
+  {name:"Париж брест", cat:"Пирожное", weight:"120-125 гр", dims:{}, desc:"Кольцо из заварного теста с заварным кремом, клубникой и миндальными слайсами.", shelf:"72 сағат, +2°C — +9°C"},
+  {name:"Фруктовая корзина", cat:"Пирожное", weight:"90 гр", dims:{}, desc:"Песочная основа с взбитыми сливками и сезонными фруктами.", shelf:"72 сағат, +2°C — +9°C"},
+  {name:"Лимонды тарт", cat:"Пирожное", weight:"90±3 гр", dims:{ұзындығы:"7±0,2",биіктігі:"4±0,5"}, desc:"Песочная основа с лимонным кремом.", shelf:"72 сағат, +2°C — +9°C"},
+  {name:"Дубайский тарт", cat:"Пирожное", weight:"—", dims:{}, shelf:"72 сағат, +2°C — +9°C"},
+  {name:"Дубайский шоколад", cat:"Пирожное", weight:"—", dims:{}, shelf:"72 сағат, +2°C — +9°C"},
+  {name:"Лимонды кекс", cat:"Пирожное", weight:"370±20 гр", dims:{ұзындығы:"18±1",ені:"8±1",биіктігі:"8±1"}, desc:"Бисквитное тесто с цедрой и соком лимона, украшенное лимонной помадкой.", shelf:"48 сағат, +9°C-тан жоғары емес"},
+  {name:"Мадлен (Карамельді)", cat:"Мадлен", weight:"43±5 гр", dims:{ұзындығы:"7±1",ені:"5±1",биіктігі:"4±1"}, desc:"Бисквит с карамельным кремом, украшенный шоколадом.", shelf:"72 сағат, +2°C — +9°C"},
+  {name:"Мадлен (Құлпынайлы)", cat:"Мадлен", weight:"43±5 гр", dims:{ұзындығы:"7±1",ені:"5±1",биіктігі:"4±1"}, desc:"Бисквит с клубничным кремом, украшенный белым шоколадом.", shelf:"72 сағат, +2°C — +9°C"},
+  {name:"Мадлен (Лимонды)", cat:"Мадлен", weight:"43±5 гр", dims:{ұзындығы:"7±1",ені:"5±1",биіктігі:"4±1"}, desc:"Лимонный бисквит с лимонным кремом.", shelf:"72 сағат, +2°C — +9°C"},
+  {name:"Мадлен (Шоколадты)", cat:"Мадлен", weight:"43±5 гр", dims:{ұзындығы:"7±1",ені:"5±1",биіктігі:"4±1"}, desc:"Шоколадный бисквит с шоколадным кремом.", shelf:"72 сағат, +2°C — +9°C"},
+  {name:"Печенье Вупи", cat:"Печенье", weight:"весовые", dims:{}, desc:"Шоколадные воздушные коржи с кремом из творожного сыра.", shelf:"72 сағат, +2°C — +9°C"},
+  {name:"Печенье Жаңғақты (упаковка)", cat:"Печенье", weight:"260-300 гр", dims:{}, shelf:"7 күн, +12°C дейін"},
+  {name:"Печенье Жер-жаңғақ (упаковка)", cat:"Печенье", weight:"260-300 гр", dims:{}, desc:"Песочное печенье с измельчённым арахисом.", shelf:"7 күн, +12°C дейін"},
+  {name:"Печенье Күнжіт (упаковка)", cat:"Печенье", weight:"260-300 гр", dims:{}, desc:"Песочное печенье с обжаренными кунжутными семенами.", shelf:"7 күн, +12°C дейін"},
+  {name:"Печенье Құрма-жаңғақ (упаковка)", cat:"Печенье", weight:"260-300 гр", dims:{}, desc:"Песочное печенье с измельченными орехами и финиками.", shelf:"7 күн, +12°C дейін"},
+  {name:"Печенье Өрік-жаңғақ (упаковка)", cat:"Печенье", weight:"260-300 гр", dims:{}, shelf:"7 күн, +12°C дейін"},
+  {name:"Печенье Сүзбелі (упаковка)", cat:"Печенье", weight:"260-300 гр", dims:{}, desc:"Песочное печенье с творожным сыром.", shelf:"7 күн, +12°C дейін"},
+  {name:"Печенье Сұлы шоколадты (упаковка)", cat:"Печенье", weight:"260-300 гр", dims:{}, shelf:"7 күн, +12°C дейін"},
+  {name:"Печенье Шоколад (упаковка)", cat:"Печенье", weight:"260-300 гр", dims:{}, desc:"Песочное печенье с каплями шоколада.", shelf:"7 күн, +12°C дейін"},
+  {name:"Печенье Ұн құрабие (упаковка)", cat:"Печенье", weight:"260-300 гр", dims:{}, desc:"Нежное песочное печенье.", shelf:"7 күн, +12°C дейін"},
+  {name:"Печенье Cookies Дубай", cat:"Печенье", weight:"—", dims:{}, shelf:"7 күн, +12°C дейін"},
+  {name:"Печенье Cookies Карамель", cat:"Печенье", weight:"—", dims:{}, shelf:"7 күн, +12°C дейін"},
+  {name:"Печенье Cookies Таңқурай", cat:"Печенье", weight:"—", dims:{}, shelf:"7 күн, +12°C дейін"},
+  {name:"Печенье Cookies Чизкейк", cat:"Печенье", weight:"—", dims:{}, shelf:"7 күн, +12°C дейін"},
+  {name:"Печенье Cookies Шоколад", cat:"Печенье", weight:"—", dims:{}, shelf:"7 күн, +12°C дейін"},
+  {name:"Макарон «Қарақат»", cat:"Макарон", weight:"—", dims:{}, desc:"Смородиновый макаронс с начинкой из смородины, белого шоколада и натуральных сливок.", ingr:"қант, бадам ұны, ақ шоколад, жұмыртқа ақуызы, табиғи кілегей, су, мұздатылған қарақат, сары май, квелли, табиғи бояу.", shelf:"5 күн, +2°C — +6°C (мұздатқышта: 1 ай, -18°C)"},
+  {name:"Макарон «Латте»", cat:"Макарон", weight:"—", dims:{}, desc:"Кофейный макаронс с начинкой из белого шоколада, кофе и натуральных сливок.", ingr:"сахар, белый шоколад, миндальная мука, натуральные сливки, белок, вода, масло сливочное, кофе.", shelf:"5 күн, +2°C — +6°C (мұздатқышта: 1 ай, -18°C)"},
+  {name:"Макарон «Пісте»", cat:"Макарон", weight:"—", dims:{}, desc:"Фисташковый макаронс с начинкой из фисташковой пасты и белого шоколада.", ingr:"сахар, миндальная мука, натуральные сливки, белый шоколад, белок, фисташки, вода, фисташковая паста, масло сливочное, пищевой краситель.", shelf:"5 күн, +2°C — +6°C (мұздатқышта: 1 ай, -18°C)"},
+  {name:"Макарон «Таңқурай»", cat:"Макарон", weight:"—", dims:{}, desc:"Малиновый макаронс с нежной начинкой из малины, белого шоколада и натуральных сливок.", ingr:"сахар, миндальная мука, белый шоколад, белок, натуральные сливки, вода, малина замороженная, масло сливочное, квелли, пищевой краситель.", shelf:"5 күн, +2°C — +6°C (мұздатқышта: 1 ай, -18°C)"},
+  {name:"Макарон «Шоколад»", cat:"Макарон", weight:"—", dims:{}, desc:"Шоколадный макаронс с начинкой из молочного шоколада и натуральных сливок.", ingr:"сахар, молочный шоколад, миндальная мука, натуральные сливки, белок, вода, какао порошок.", shelf:"5 күн, +2°C — +6°C (мұздатқышта: 1 ай, -18°C)"},
+  {name:"Моти Қарақатпен", cat:"Моти", weight:"100±15 гр", dims:{ұзындығы:"7±0,5",биіктігі:"4±0,5"}, ingr:"Күріш ұны, сүзбелі ірімшік, кілегей, қарақат, қант.", shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Моти Құлпынайлы", cat:"Моти", weight:"100±15 гр", dims:{ұзындығы:"7±0,5",биіктігі:"4±0,5"}, ingr:"Күріш ұны, сүзбелі ірімшік, кілегей, құлпынай, қант.", shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Моти Шоколадты", cat:"Моти", weight:"100±15 гр", dims:{ұзындығы:"7±0,5",биіктігі:"4±0,5"}, ingr:"Күріш ұны, сүзбелі ірімшік, кілегей, шоколад, какао.", shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Моти Бананды", cat:"Моти", weight:"100±15 гр", dims:{ұзындығы:"7±0,5",биіктігі:"4±0,5"}, ingr:"Күріш ұны, сүзбелі ірімшік, кілегей, банан, қант.", shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Моти Киви", cat:"Моти", weight:"100±15 гр", dims:{ұзындығы:"7±0,5",биіктігі:"4±0,5"}, ingr:"Күріш ұны, сүзбелі ірімшік, кілегей, киви, қант.", shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Моти Карамелді", cat:"Моти", weight:"100±15 гр", dims:{ұзындығы:"7±0,5",биіктігі:"4±0,5"}, ingr:"Күріш ұны, сүзбелі ірімшік, кілегей, жержаңғақ, карамель.", shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Корпусты мусс Fista", cat:"Десерт", weight:"2 100 ₸", dims:{}, desc:"Фисташковый бисквит с хрустящим слоем, фисташковым кремо и пралине. Покрыт гладкой глазурью.", ingr:"натуральные сливки, белый шоколад, яйцо, фисташки, сахар, молоко, какао масло, сливочное масло, мука в/с, вода, фисташковая мука, вафельная крошка, подсолнечное масло, желатин, крахмал кукурузный, разрыхлитель, натуральный пищевой краситель.", shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Корпусты мусс Mango", cat:"Десерт", weight:"2 100 ₸", dims:{}, desc:"Нежный манговый мусс в хрустящем корпусе с начинкой из пюре манго.", ingr:"натуральные сливки, пюре манговое, белый шоколад, какао масло, вода, желатин, сахар, агар-агар, ксантановая камедь, натуральный пищевой краситель.", shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Корпусты мусс Kofe", cat:"Десерт", weight:"2 100 ₸", dims:{}, desc:"Брауни с ароматом кофе, хрустящий кофейный слой, шоколадная карамель. Лёгкий кофейный мусс.", ingr:"натуральные сливки, молочный шоколад, сахар, темный шоколад, какао масло, яйцо, масло сливочное, вафельная крошка, вода, белок, миндальная мука, какао, мука в/с, подсолнечное масло, кофе, желатин.", shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Корпусты мусс Kokos", cat:"Десерт", weight:"2 100 ₸", dims:{}, desc:"Нежный кокосовый мусс с яркой начинкой из пюре манго и кусочками маракуйи.", ingr:"натуральные сливки, пюре кокосовое, белый шоколад, пюре манговое, какао масло, молочный шоколад, темный шоколад, вода, сахар, желатин, агар-агар, ксантановая камедь.", shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Жидекті профитроль", cat:"Десерт", weight:"—", dims:{}, shelf:"72 сағат, +2°C — +6°C"},
+  {name:"Берлинер ванильді", cat:"Берлинер", weight:"—", dims:{}, desc:"Воздушное дрожжевое тесто, жареное во фритюре. Начинка — сливочно-заварной крем с ванильной пастой.", ingr:"сүт, жұмыртқа, табиғи кілегей, ұн ж/с, ашытқы, сары май, қант, жүгері крахмалы, тұз, қоюландырылған сүт, ванильді паста, қант ұнтағы.", shelf:"48 сағат, +2°C — +6°C"},
+  {name:"Берлинер пістелі", cat:"Берлинер", weight:"—", dims:{}, desc:"Воздушное дрожжевое тесто. Начинка — сливочно-заварной крем с натуральной фисташковой пастой.", ingr:"сүт, жұмыртқа, табиғи кілегей, ұн ж/с, ашытқы, сары май, қант, жүгері крахмалы, тұз, қоюландырылған сүт, пісте, пісте пастасы, қант ұнтағы.", shelf:"48 сағат, +2°C — +6°C"},
+  {name:"Берлинер таңқурайлы", cat:"Берлинер", weight:"—", dims:{}, desc:"Воздушное дрожжевое тесто. Начинка — сливочно-заварной крем с натуральной малиной.", ingr:"сүт, жұмыртқа, табиғи кілегей, ұн ж/с, ашытқы, сары май, қант, жүгері крахмалы, тұз, қоюландырылған сүт, таңқурай, кептірілген таңқурай, қант ұнтағы.", shelf:"48 сағат, +2°C — +6°C"},
+  {name:"Берлинер шоколадты", cat:"Берлинер", weight:"—", dims:{}, desc:"Воздушное дрожжевое тесто. Начинка — сливочно-заварной крем с натуральным шоколадом.", ingr:"сүт, жұмыртқа, табиғи кілегей, ұн ж/с, ашытқы, сары май, қант, жүгері крахмалы, тұз, қоюландырылған сүт, табиғи шоколад, қант ұнтағы.", shelf:"48 сағат, +2°C — +6°C"},
+  {name:"Пицца маргарита 30см", cat:"Пицца", weight:"—", dims:{диаметрі:"30"}, shelf:"—"},
+  {name:"Пицца сырная 30см", cat:"Пицца", weight:"3 600 ₸", dims:{диаметрі:"30"}, ingr:"сыр моцарелла, шпинат, творожный сыр, соус Мутти.", shelf:"—"},
+  {name:"Пицца мексиканская 30см", cat:"Пицца", weight:"—", dims:{диаметрі:"30"}, ingr:"охотничьи сосиски, сыр моцарелла, соус Мутти, фирменный сладко-острый соус.", shelf:"—"},
+  {name:"Пицца пепперони 30см", cat:"Пицца", weight:"—", dims:{диаметрі:"30"}, ingr:"колбаса, соус Мутти, сыр моцарелла.", shelf:"—"},
+  {name:"Пицца с курицей 30см", cat:"Пицца", weight:"—", dims:{диаметрі:"30"}, ingr:"куриная грудка, красный лук, сыр моцарелла, соус Мутти.", shelf:"—"},
+  {name:"Сет Береке", cat:"Сет", weight:"26 500 ₸", dims:{}, desc:"Шығыс самсасы тауықпен 10дн · Бөрек картоп 10дн · Бөрек ет 10дн · Бауырсақ 1кг · Алмалы кекс 6дн · Куриный пирог 1дн · Бәліш 1дн · Шу 6дн", shelf:"—"},
+  {name:"Сет Дастархан", cat:"Сет", weight:"38 500 ₸", dims:{}, desc:"Шығыс самсасы тауықпен 10дн · Шығыс самсасы етпен 10дн · Бөрек алма 5дн · Бөрек ет 10дн · Бөрек тауық 10дн · Бауырсақ 2кг · Алмалы кекс 6дн · Бәліш 1дн · Торт 1дн · Эклер 6дн", shelf:"—"},
+  {name:"Сет Шанырак", cat:"Сет", weight:"17 500 ₸", dims:{}, desc:"Шығыс самсасы ет 5дн · тауық 5дн · Бауырсақ 1кг · Мини-муравейник 6дн · Бөрек ет/тауық 4дн · Бөрек картоп/алма 4дн · Торт 1дн", shelf:"—"},
+];
+
+const categories = [...new Set(products.map(p => p.cat))];
+let activeFilter = 'Барлығы';
+let expandedIdx = null;
+
+function formatDims(dims) {
+  const entries = Object.entries(dims);
+  if (!entries.length) return '<span class="no-data">—</span>';
+  return entries.map(([k,v]) => `<div class="dim-item"><div class="dim-value">${v}</div><div class="dim-label">${k}</div></div>`).join('');
+}
+
+function applyFilters() {
+  const q = document.getElementById('searchInput').value.toLowerCase();
+  let list = products.map((p, i) => ({...p, _i: i}));
+  if (activeFilter !== 'Барлығы') list = list.filter(p => p.cat === activeFilter);
+  if (q) list = list.filter(p =>
+    p.name.toLowerCase().includes(q) ||
+    p.cat.toLowerCase().includes(q) ||
+    (p.ingr||'').toLowerCase().includes(q) ||
+    (p.desc||'').toLowerCase().includes(q)
+  );
+  document.getElementById('resultsInfo').textContent = `${list.length} өнім табылды`;
+  const grid = document.getElementById('grid');
+  if (!list.length) {
+    grid.innerHTML = `<div class="no-results"><div class="icon">🔍</div><p>Өнім табылмады</p></div>`;
+    return;
+  }
+  grid.innerHTML = list.map((p) => {
+    const isExp = expandedIdx === p._i;
+    const hasDims = Object.keys(p.dims||{}).length > 0;
+    return `<div class="card${isExp?' expanded':''}" onclick="toggle(${p._i})">
+      <div class="card-header">
+        <div class="product-name">${p.name}</div>
+        <span class="category-tag">${p.cat}</span>
+      </div>
+      <div class="card-weight">${p.weight||'—'}</div>
+      ${hasDims?`<div class="card-dims">${Object.entries(p.dims).map(([k,v])=>`${k}: ${v} см`).join(' · ')}</div>`:''}
+      ${p.shelf&&p.shelf!=='—'?`<div class="shelf-badge">🕐 ${p.shelf}</div>`:''}
+      <div class="expand-btn">${isExp?'▲ жабу':'▼ толығырақ'}</div>
+      <div class="card-detail">
+        <div class="detail-section"><h4>Өлшемдер (см)</h4><div class="dims-grid">${formatDims(p.dims)}</div></div>
+        <div class="detail-section"><h4>Сипаттама</h4><p>${p.desc||'<span class="no-data">—</span>'}</p></div>
+        <div class="detail-section">
+          <h4>Сақтау мерзімі</h4><p class="shelf-detail">🕐 ${p.shelf||'—'}</p>
+          ${p.ingr?`<h4 style="margin-top:10px">Құрамы</h4><p>${p.ingr}</p>`:''}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function toggle(i) { expandedIdx = expandedIdx===i?null:i; applyFilters(); }
+
+const filtersEl = document.getElementById('filters');
+['Барлығы',...categories].forEach(cat => {
+  const btn = document.createElement('button');
+  btn.className = 'filter-btn'+(cat==='Барлығы'?' active':'');
+  btn.textContent = cat;
+  btn.onclick = () => {
+    activeFilter = cat; expandedIdx = null;
+    document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active'); applyFilters();
+  };
+  filtersEl.appendChild(btn);
+});
+document.getElementById('searchInput').addEventListener('input', ()=>{expandedIdx=null;applyFilters();});
+applyFilters();
+
+
+/* ═══════════════════════
+   KASPI KASSA
+═══════════════════════ */
+const DEMO = {
+  date:'2026-01-05', total:198640,
+  txns:[
+    {id:1,time:'08:47:24',amount:9600},{id:2,time:'09:03:57',amount:8100},
+    {id:3,time:'10:21:19',amount:7760},{id:4,time:'10:41:54',amount:9000},
+    {id:5,time:'10:45:07',amount:14980},{id:6,time:'10:59:50',amount:22600},
+    {id:7,time:'11:01:44',amount:5000},{id:8,time:'11:55:47',amount:14100},
+    {id:9,time:'12:46:26',amount:10300},{id:10,time:'12:58:59',amount:1400},
+    {id:11,time:'13:04:53',amount:11700},{id:12,time:'13:22:06',amount:15200},
+    {id:13,time:'13:31:07',amount:4300},{id:14,time:'14:51:41',amount:8100},
+    {id:15,time:'15:57:26',amount:9600},{id:16,time:'16:31:44',amount:9700},
+    {id:17,time:'16:55:36',amount:5000},{id:18,time:'17:25:37',amount:22500},
+    {id:19,time:'19:05:57',amount:9700}
+  ]
+};
+let kTxns=[], kStates={}, kMeta={}, kFilter='all';
+const kFmt = n => n.toLocaleString('ru-RU')+' ₸';
+const ls = key => localStorage.getItem(key);
+const lss = (k,v) => localStorage.setItem(k,v);
+
+function initKaspiApp() {
+  updateKClock();
+  setInterval(updateKClock, 1000);
+  const d=new Date();
+  document.getElementById('kDateLabel').textContent=d.toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'});
+  const url=ls('scriptUrl');
+  if(url){ document.getElementById('scriptUrl').value=url; updateConnBadge(true); }
+  const ops=ls('operators');
+  if(ops){ const o=JSON.parse(ops); document.getElementById('op1').value=o[0]||''; document.getElementById('op2').value=o[1]||''; updateOpSelect(); }
+}
+
+function updateKClock(){
+  const n=new Date(); const p=x=>String(x).padStart(2,'0');
+  const el=document.getElementById('kClock');
+  if(el) el.textContent=`${p(n.getHours())}:${p(n.getMinutes())}:${p(n.getSeconds())}`;
+}
+
+function kaspiNav(id,btn){
+  document.querySelectorAll('#view-kaspi .k-section').forEach(s=>s.classList.remove('active'));
+  document.querySelectorAll('#view-kaspi .k-nav-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('tab-'+id).classList.add('active');
+  btn.classList.add('active');
+  if(id==='history') loadHistory();
+}
+
+function loadDemo(){
+  kTxns=DEMO.txns.map(t=>({...t}));
+  kTxns.forEach(t=>{kStates[t.id]='none'; kMeta[t.id]={client:'',orderDate:'',comment:''};});
+  document.getElementById('rDate').value=DEMO.date;
+  document.getElementById('kassaMain').style.display='block';
+  document.getElementById('uploadZone').style.display='none';
+  const demoBtn=document.querySelector('[onclick="loadDemo()"]');
+  if(demoBtn) demoBtn.style.display='none';
+  renderAll();
+}
+
+function renderAll(){ renderTxns(); renderSverka(); renderPrepays(); }
+
+function renderTxns(){
+  const list=document.getElementById('txnList'); list.innerHTML='';
+  const show=kFilter==='all'?kTxns:kTxns.filter(t=>kStates[t.id]===kFilter);
+  show.forEach(t=>{
+    const s=kStates[t.id];
+    const div=document.createElement('div');
+    div.className='txn-item'+(s!=='none'?' '+s:'');
+    div.innerHTML=`
+      <div class="chk">${s==='prepay'?'P':s==='daily'?'✓':''}</div>
+      <div class="txn-time">${t.time.slice(0,5)}</div>
+      <div style="flex:1;"><div class="txn-amt">${kFmt(t.amount)}</div>
+        <input class="txn-note-in" placeholder="заметка..." value="${kMeta[t.id]?.comment||''}"
+          onclick="event.stopPropagation()" oninput="kMeta[${t.id}].comment=this.value"></div>
+      <div class="txn-tag ${s==='prepay'?'tp':s==='daily'?'td':'tn'}">${s==='prepay'?'Предоплата':s==='daily'?'Дневной':'—'}</div>`;
+    div.addEventListener('click',()=>kCycle(t.id));
+    list.appendChild(div);
+  });
+}
+
+function kCycle(id){
+  const cur=kStates[id];
+  kStates[id]=cur==='none'?'prepay':cur==='prepay'?'daily':'none';
+  renderAll();
+}
+function markAll(type){ kTxns.forEach(t=>kStates[t.id]=type); renderAll(); }
+function resetAll(){ kTxns.forEach(t=>kStates[t.id]='none'); renderAll(); }
+function setFilter(f,el){
+  kFilter=f;
+  document.querySelectorAll('#view-kaspi .leg').forEach(l=>l.classList.remove('active'));
+  el.classList.add('active');
+  renderTxns();
+}
+
+function renderSverka(){
+  const total=kTxns.reduce((s,t)=>s+t.amount,0);
+  const daily=kTxns.filter(t=>kStates[t.id]==='daily').reduce((s,t)=>s+t.amount,0);
+  const prepay=kTxns.filter(t=>kStates[t.id]==='prepay').reduce((s,t)=>s+t.amount,0);
+  const unset=kTxns.filter(t=>kStates[t.id]==='none');
+  const unsetAmt=unset.reduce((s,t)=>s+t.amount,0);
+  const diff=total-daily-prepay;
+  const dc=kTxns.filter(t=>kStates[t.id]==='daily').length;
+  const pc=kTxns.filter(t=>kStates[t.id]==='prepay').length;
+  document.getElementById('kTotal').textContent=kFmt(total);
+  document.getElementById('kTxn').textContent=kTxns.length+' транзакций';
+  document.getElementById('kDaily').textContent=kFmt(daily);
+  document.getElementById('kDailyN').textContent=dc+' шт';
+  document.getElementById('kPrepay').textContent=kFmt(prepay);
+  document.getElementById('kPrepayN').textContent=pc+' шт';
+  document.getElementById('sv-tot').textContent=kFmt(total);
+  document.getElementById('sv-day').textContent=kFmt(daily);
+  document.getElementById('sv-pre').textContent=kFmt(prepay);
+  document.getElementById('sv-un').textContent=unset.length>0?kFmt(unsetAmt)+' ('+unset.length+' шт)':'—';
+  const closeBtn=document.getElementById('closeBtn');
+  const sb=document.getElementById('statusBox');
+  const badge=document.getElementById('svBadge');
+  const diffEl=document.getElementById('sv-diff');
+  const kDiffEl=document.getElementById('kDiff');
+  const kDs=document.getElementById('kDiffSub');
+  if(unset.length>0){
+    diffEl.textContent=kFmt(unsetAmt)+' не размечено'; diffEl.style.color='var(--yellow)';
+    kDiffEl.textContent=kFmt(unsetAmt); kDiffEl.style.color='var(--yellow)';
+    kDs.textContent=unset.length+' не размечено';
+    document.getElementById('kDiffCard').style.borderLeftColor='var(--yellow)';
+    badge.className='k-badge by'; badge.textContent='В процессе';
+    sb.className='k-status s-warn';
+    sb.innerHTML=`<div class="s-icon">⚠️</div><div><div class="s-title">Осталось разметить: ${unset.length} транзакций</div><div class="s-sub">Клик = Предоплата → Дневной → сброс</div></div>`;
+    closeBtn.disabled=true; closeBtn.style.opacity='.4';
+  } else if(diff===0){
+    diffEl.textContent='✓ 0 ₸ — сходится'; diffEl.style.color='var(--green)';
+    kDiffEl.textContent='0 ₸'; kDiffEl.style.color='var(--green)';
+    kDs.textContent='✓ Касса сходится';
+    document.getElementById('kDiffCard').style.borderLeftColor='var(--green)';
+    badge.className='k-badge bg'; badge.textContent='✅ Сходится';
+    sb.className='k-status s-ok';
+    sb.innerHTML=`<div class="s-icon">✅</div><div><div class="s-title">Касса сходится!</div><div class="s-sub">Дневные (${kFmt(daily)}) + Предоплаты (${kFmt(prepay)}) = ${kFmt(total)}</div></div>`;
+    closeBtn.disabled=false; closeBtn.style.opacity='1';
+  } else {
+    diffEl.textContent=kFmt(Math.abs(diff))+(diff>0?' — излишек':' — недостача'); diffEl.style.color='var(--red)';
+    kDiffEl.textContent=kFmt(Math.abs(diff)); kDiffEl.style.color='var(--red)';
+    kDs.textContent=diff>0?'Излишек':'Недостача';
+    document.getElementById('kDiffCard').style.borderLeftColor='var(--red)';
+    badge.className='k-badge br'; badge.textContent='❌ Расхождение';
+    sb.className='k-status s-err';
+    sb.innerHTML=`<div class="s-icon">❌</div><div><div class="s-title">Расхождение: ${kFmt(Math.abs(diff))}</div><div class="s-sub">Проверьте разметку</div></div>`;
+    closeBtn.disabled=true; closeBtn.style.opacity='.4';
+  }
+}
+
+function renderPrepays(){
+  const pps=kTxns.filter(t=>kStates[t.id]==='prepay');
+  document.getElementById('ppBadge').textContent=pps.length+' шт';
+  const cont=document.getElementById('ppDetails');
+  if(!pps.length){ cont.innerHTML='<div style="text-align:center;padding:16px;color:var(--text3);font-size:13px;">Отметьте транзакции как «Предоплата»</div>'; return; }
+  cont.innerHTML='';
+  pps.forEach(t=>{
+    const m=kMeta[t.id];
+    const d=document.createElement('div'); d.className='pp-item';
+    d.innerHTML=`
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-family:var(--mono);font-size:13px;color:var(--accent2);font-weight:600;">${kFmt(t.amount)}</span>
+        <span style="font-size:11px;color:var(--text3);">${t.time.slice(0,5)}</span>
+      </div>
+      <div class="pp-grid">
+        <div class="fg"><label class="fl">Клиент</label>
+          <input class="fi" style="font-size:12px;padding:5px 9px;" type="text" placeholder="ФИО / компания" value="${m.client||''}" oninput="kMeta[${t.id}].client=this.value">
+        </div>
+        <div class="fg"><label class="fl">Дата заказа</label>
+          <input class="fi" style="font-size:12px;padding:5px 9px;" type="date" value="${m.orderDate||''}" oninput="kMeta[${t.id}].orderDate=this.value">
+        </div>
+      </div>`;
+    cont.appendChild(d);
+  });
+}
+
+async function closeShift(){
+  const url=ls('scriptUrl');
+  if(!url){ alert('Сначала настройте Google Sheets в разделе ⚙️ Настройки'); return; }
+  const date=document.getElementById('rDate').value;
+  const op=document.getElementById('rOp').value;
+  const comment=document.getElementById('rComment').value;
+  const total=kTxns.reduce((s,t)=>s+t.amount,0);
+  const daily=kTxns.filter(t=>kStates[t.id]==='daily').reduce((s,t)=>s+t.amount,0);
+  const prepay=kTxns.filter(t=>kStates[t.id]==='prepay').reduce((s,t)=>s+t.amount,0);
+  const saveEl=document.getElementById('saveStatus');
+  saveEl.style.color='var(--text3)'; saveEl.textContent='⏳ Сохраняем...';
+  try {
+    await fetch(url,{method:'POST',body:JSON.stringify({
+      type:'shift', date, operator:op, comment,
+      totalKaspi:total, totalDaily:daily, totalPrepay:prepay, diff:0,
+      txnCount:kTxns.length,
+      prepayCount:kTxns.filter(t=>kStates[t.id]==='prepay').length,
+      dailyCount:kTxns.filter(t=>kStates[t.id]==='daily').length,
+    })});
+    await fetch(url,{method:'POST',body:JSON.stringify({
+      type:'transactions', date, operator:op,
+      transactions:kTxns.map(t=>({
+        time:t.time, amount:t.amount, type:kStates[t.id],
+        client:kMeta[t.id]?.client||'', orderDate:kMeta[t.id]?.orderDate||'', comment:kMeta[t.id]?.comment||''
+      }))
+    })});
+    saveEl.style.color='var(--green)'; saveEl.textContent='✅ Смена сохранена в Google Sheets!';
+  } catch(err){ saveEl.style.color='var(--red)'; saveEl.textContent='❌ Ошибка: '+err.message; }
+}
+
+async function loadHistory(){
+  const url=ls('scriptUrl');
+  const cont=document.getElementById('historyContent');
+  if(!url){ cont.innerHTML='<div style="text-align:center;padding:32px;color:var(--text3);font-size:13px;">Настройте Google Sheets в разделе ⚙️ Настройки</div>'; return; }
+  cont.innerHTML='<div style="text-align:center;padding:20px;color:var(--text3);">⏳ Загружаем...</div>';
+  try{
+    const res=await fetch(url+'?action=getShifts');
+    const json=await res.json();
+    if(!json.data||!json.data.length){ cont.innerHTML='<div style="text-align:center;padding:32px;color:var(--text3);font-size:13px;">История пуста — закройте первую смену</div>'; return; }
+    cont.innerHTML=`<div style="overflow-x:auto;"><table>
+      <thead><tr><th>Дата</th><th>Оператор</th><th>Итого Каспи</th><th>Дневные</th><th>Предоплаты</th><th>Транзакций</th><th>Статус</th></tr></thead>
+      <tbody>${json.data.reverse().map(r=>`<tr>
+        <td class="mo">${r['Дата']||''}</td><td>${r['Оператор']||''}</td>
+        <td class="mo" style="color:var(--text);">${Number(r['Итого Каспи (₸)']).toLocaleString('ru-RU')+' ₸'}</td>
+        <td class="mo" style="color:var(--green);">${Number(r['Дневные заказы (₸)']).toLocaleString('ru-RU')+' ₸'}</td>
+        <td class="mo" style="color:var(--accent2);">${Number(r['Предоплаты (₸)']).toLocaleString('ru-RU')+' ₸'}</td>
+        <td class="mo">${r['Кол-во транзакций']||''}</td>
+        <td>${r['Статус сверки']||''}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+  } catch(e){ cont.innerHTML=`<div style="text-align:center;padding:20px;color:var(--red);">Ошибка загрузки: ${e.message}</div>`; }
+}
+
+function saveUrl(){
+  const url=document.getElementById('scriptUrl').value.trim();
+  if(!url){alert('Введите URL');return;}
+  lss('scriptUrl',url);
+  updateConnBadge(true);
+  document.getElementById('connResult').style.color='var(--green)';
+  document.getElementById('connResult').textContent='✅ URL сохранён';
+}
+async function testConn(){
+  const url=document.getElementById('scriptUrl').value.trim();
+  const el=document.getElementById('connResult');
+  if(!url){alert('Введите URL');return;}
+  el.style.color='var(--text3)'; el.textContent='⏳ Проверяем...';
+  try{
+    const r=await fetch(url+'?action=getShifts');
+    const j=await r.json();
+    if(j.status==='ok'){ el.style.color='var(--green)'; el.textContent='✅ Подключение работает! Смен: '+(j.data?.length||0); updateConnBadge(true); }
+    else throw new Error(j.message);
+  } catch(e){ el.style.color='var(--red)'; el.textContent='❌ Ошибка: '+e.message; updateConnBadge(false); }
+}
+function updateConnBadge(ok){
+  const b=document.getElementById('connBadge');
+  if(ok){ b.style.background='var(--gbg)'; b.style.color='var(--green)'; b.textContent='✅ Подключено'; }
+  else { b.style.background='var(--rbg)'; b.style.color='var(--red)'; b.textContent='❌ Ошибка'; }
+}
+function saveOps(){
+  const o1=document.getElementById('op1').value;
+  const o2=document.getElementById('op2').value;
+  lss('operators',JSON.stringify([o1,o2]));
+  updateOpSelect();
+  alert('✅ Операторы сохранены');
+}
+function updateOpSelect(){
+  const ops=ls('operators');
+  if(!ops)return;
+  const [o1,o2]=JSON.parse(ops);
+  const sel=document.getElementById('rOp');
+  if(sel) sel.innerHTML=`<option>${o1}</option><option>${o2}</option>`;
+}
+
+// PDF upload handler
+document.addEventListener('DOMContentLoaded', ()=>{
+  // Handle deep links from callcenter.html
+  const hash = window.location.hash.slice(1);
+  if (hash === 'catalog') showTab('catalog');
+  else if (hash === 'kaspi') showTab('kaspi');
+
+  initKaspiApp();
+  const fiEl=document.getElementById('fi');
+  if(fiEl) fiEl.addEventListener('change',function(e){
+    const f=e.target.files[0]; if(!f)return;
+    document.getElementById('uploadZone').innerHTML=`<div style="font-size:28px;margin-bottom:8px;">✅</div><div style="font-size:14px;font-weight:600;">${f.name} загружен</div><div style="font-size:12px;color:var(--text3);margin-top:4px;">Используются данные из PDF</div>`;
+    document.getElementById('uploadZone').classList.add('done');
+    loadDemo();
+  });
+  const uzEl=document.getElementById('uploadZone');
+  if(uzEl){
+    uzEl.addEventListener('dragover',e=>{e.preventDefault();uzEl.style.borderColor='var(--accent)';});
+    uzEl.addEventListener('dragleave',()=>{uzEl.style.borderColor='';});
+    uzEl.addEventListener('drop',e=>{e.preventDefault();uzEl.style.borderColor='';const f=e.dataTransfer.files[0];if(f){document.getElementById('fi').files=e.dataTransfer.files;document.getElementById('fi').dispatchEvent(new Event('change'));}});
+  }
+});
+</script>
+</body>
+</html>

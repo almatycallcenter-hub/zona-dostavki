@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ТӘП-ТӘТТІ · Сары Арка — Тарифы Вольт</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Segoe UI',Arial,sans-serif; }
+
+  #header {
+    background:#e63946; color:white;
+    padding:11px 18px;
+    display:flex; align-items:center; justify-content:space-between;
+    box-shadow:0 2px 8px rgba(0,0,0,0.2);
+    position:relative; z-index:1000;
+  }
+  #header h1 { font-size:16px; font-weight:700; }
+  #header .sub { font-size:11px; opacity:0.85; margin-top:2px; }
+
+  #container { display:flex; height:calc(100vh - 50px); }
+
+  #sidebar {
+    width:260px; min-width:260px;
+    background:white;
+    overflow-y:auto;
+    box-shadow:2px 0 8px rgba(0,0,0,0.08);
+    z-index:500;
+  }
+  #sidebar h2 {
+    font-size:10.5px; font-weight:700; color:#999;
+    padding:11px 14px 6px;
+    text-transform:uppercase; letter-spacing:0.6px;
+    border-bottom:1px solid #eee;
+  }
+
+  .zone-row {
+    display:flex; align-items:center; gap:9px;
+    padding:8px 14px;
+    border-bottom:1px solid #f3f3f3;
+    cursor:pointer;
+    transition:background 0.12s;
+  }
+  .zone-row:hover { background:#fafafa; }
+  .zone-row.active { background:#fff8f0; }
+
+  .swatch {
+    width:14px; height:14px; min-width:14px;
+    border-radius:3px;
+  }
+  .zone-label { font-size:12px; color:#444; flex:1; }
+  .zone-price { font-size:13px; font-weight:700; color:#222; }
+  .zone-free  { font-size:10px; color:#aaa; text-align:right; }
+
+  #map { flex:1; }
+
+  .legend {
+    background:white; padding:10px 13px;
+    border-radius:8px;
+    box-shadow:0 2px 8px rgba(0,0,0,0.15);
+    font-size:11px; max-height:320px; overflow-y:auto;
+  }
+  .legend b { display:block; margin-bottom:6px; font-size:12px; }
+  .leg-row { display:flex; align-items:center; gap:6px; margin-bottom:3px; }
+  .leg-sq { width:12px; height:12px; min-width:12px; border-radius:2px; }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <div>
+    <h1>🍰 Сары Арка (4 мкр) · Тарифы доставки</h1>
+    <div class="sub">Вольт · зоны по 500 м · от 1 км</div>
+  </div>
+</div>
+
+<div id="container">
+  <div id="sidebar">
+    <h2>Зоны доставки</h2>
+    <div id="zone-list"></div>
+  </div>
+  <div id="map"></div>
+</div>
+
+<script>
+// Координаты филиала 4 мкр (Сары Арка)
+const CENTER = [43.2297738, 76.8576855];
+
+const zones = [
+  { label:"до 1 км",     r:1000, price:"1 462,68 ₸" },
+  { label:"1 – 1,5 км",  r:1500, price:"1 560,55 ₸" },
+  { label:"1,5 – 2 км",  r:2000, price:"1 658,42 ₸" },
+  { label:"2 – 2,5 км",  r:2500, price:"1 756,29 ₸" },
+  { label:"2,5 – 3 км",  r:3000, price:"1 854,16 ₸" },
+  { label:"3 – 3,5 км",  r:3500, price:"1 952,03 ₸" },
+  { label:"3,5 – 4 км",  r:4000, price:"2 049,90 ₸" },
+  { label:"4 – 4,5 км",  r:4500, price:"2 147,77 ₸" },
+  { label:"4,5 – 5 км",  r:5000, price:"2 245,64 ₸" },
+  { label:"5 – 5,5 км",  r:5500, price:"2 490,36 ₸" },
+  { label:"5,5 – 6 км",  r:6000, price:"2 735,04 ₸" },
+  { label:"6 – 6,5 км",  r:6500, price:"2 979,74 ₸" },
+  { label:"6,5 – 7 км",  r:7000, price:"3 224,42 ₸" },
+];
+
+// Цветовой градиент: зелёный → жёлтый → оранжевый → красный
+const COLORS = [
+  "#4caf50","#66bb6a","#9ccc65","#d4e157",
+  "#ffee58","#ffca28","#ffa726","#ff7043",
+  "#ef5350","#e53935","#c62828","#b71c1c","#880e0e"
+];
+
+const map = L.map('map', { center: CENTER, zoom: 13 });
+L.tileLayer('https://tile{s}.maps.2gis.com/tiles?x={x}&y={y}&z={z}&v=1',{
+  subdomains:['0','1','2','3'], attribution:'© 2ГИС', maxZoom:19
+}).addTo(map);
+
+const circles = [];
+
+// Рисуем от большого к малому (чтобы маленькие были сверху)
+[...zones].reverse().forEach((z, ri) => {
+  const i = zones.length - 1 - ri;
+  const col = COLORS[i];
+  const c = L.circle(CENTER, {
+    radius: z.r,
+    color: col,
+    weight: 1.5,
+    opacity: 0.8,
+    fillColor: col,
+    fillOpacity: 0.13
+  }).addTo(map)
+    .bindPopup(`
+      <div style="font-family:'Segoe UI',Arial,sans-serif;min-width:160px">
+        <div style="font-weight:700;font-size:13px;color:#333;margin-bottom:4px">📦 ${z.label}</div>
+        <div style="font-size:15px;font-weight:800;color:#e63946">${z.price}</div>
+        <div style="font-size:10px;color:#aaa;margin-top:3px">тариф Вольт</div>
+      </div>
+    `, { maxWidth:200 });
+  circles.push({ circle:c, zone:z, color:col, idx:i });
+});
+
+// Маркер филиала
+const icon = L.divIcon({
+  className:'',
+  html:`<div style="background:#e63946;color:white;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.35)">4</div>`,
+  iconSize:[28,28], iconAnchor:[14,14]
+});
+L.marker(CENTER, {icon}).addTo(map)
+  .bindPopup(`<b>4 мкр · Сары Арка</b><br><small>4-й мкр, 28/1</small>`);
+
+// Сайдбар
+const list = document.getElementById('zone-list');
+zones.forEach((z, i) => {
+  const col = COLORS[i];
+  const div = document.createElement('div');
+  div.className = 'zone-row';
+  div.id = `zr-${i}`;
+  div.innerHTML = `
+    <div class="swatch" style="background:${col}"></div>
+    <div class="zone-label">${z.label}</div>
+    <div>
+      <div class="zone-price">${z.price}</div>
+    </div>`;
+  div.addEventListener('click', () => {
+    // Найти и открыть попап нужного круга
+    const found = circles.find(c => c.idx === i);
+    if (found) {
+      map.setView(CENTER, getZoom(z.r), { animate:true });
+      found.circle.openPopup([CENTER[0] + z.r * 0.000009, CENTER[1]]);
+    }
+    document.querySelectorAll('.zone-row').forEach(el => el.classList.remove('active'));
+    div.classList.add('active');
+  });
+  list.appendChild(div);
+});
+
+function getZoom(r) {
+  if (r <= 1000) return 15;
+  if (r <= 2000) return 14;
+  if (r <= 3500) return 13;
+  if (r <= 5000) return 12;
+  return 11;
+}
+
+// Легенда
+const legend = L.control({ position:'bottomright' });
+legend.onAdd = () => {
+  const d = document.createElement('div');
+  d.className = 'legend';
+  d.innerHTML = `<b>Тариф Вольт</b>` +
+    zones.map((z,i) => `
+      <div class="leg-row">
+        <div class="leg-sq" style="background:${COLORS[i]}"></div>
+        <span style="flex:1">${z.label}</span>
+        <span style="font-weight:700">${z.price}</span>
+      </div>`).join('');
+  return d;
+};
+legend.addTo(map);
+</script>
+</body>
+</html>
