@@ -188,7 +188,20 @@ function getShifts() {
       return obj;
     });
 
-    return { status: 'ok', data };
+    // Дата должна быть уникальной. Если в листе остались дубликаты
+    // (например, из-за старого бага со сравнением дат), оставляем
+    // только запись с самым последним «Время записи» для каждой даты.
+    const byDate = {};
+    data.forEach(row => {
+      const d = row['Дата'];
+      const existing = byDate[d];
+      if (!existing || String(row['Время записи']) >= String(existing['Время записи'])) {
+        byDate[d] = row;
+      }
+    });
+    const deduped = Object.values(byDate).sort((a, b) => String(a['Дата']).localeCompare(String(b['Дата'])));
+
+    return { status: 'ok', data: deduped };
   } catch (err) {
     return { status: 'error', message: err.message, data: [] };
   }
@@ -262,6 +275,42 @@ function getCarryoverPrepays(date) {
     return { status: 'ok', total, count: matches.length };
   } catch (err) {
     return { status: 'error', message: err.message, total: 0, count: 0 };
+  }
+}
+
+// ════════════════════════════════════════════════════════════
+//  Разовая очистка дублей в листе «Смены» (запускать вручную
+//  из редактора Apps Script: выбрать функцию cleanupDuplicateShifts
+//  в выпадающем списке вверху и нажать ▶ Выполнить).
+//  Оставляет для каждой даты строку с самым последним «Время записи».
+// ════════════════════════════════════════════════════════════
+function cleanupDuplicateShifts() {
+  const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(SHEET_SHIFTS);
+  if (!sheet) return;
+
+  const rows = sheet.getDataRange().getValues();
+  if (rows.length <= 2) return;
+
+  const headers = rows[0];
+  const idxDate    = headers.indexOf('Дата');
+  const idxLogTime = headers.indexOf('Время записи');
+
+  // Для каждой даты находим индекс строки (1-based, с учётом заголовка) с самым поздним «Время записи»
+  const bestRowForDate = {};
+  for (let i = 1; i < rows.length; i++) {
+    const d = String(normalizeCell('Дата', rows[i][idxDate]));
+    const logTime = String(rows[i][idxLogTime]);
+    if (!bestRowForDate[d] || logTime >= bestRowForDate[d].logTime) {
+      bestRowForDate[d] = { rowIndex: i, logTime };
+    }
+  }
+  const keepRowIndexes = new Set(Object.values(bestRowForDate).map(v => v.rowIndex));
+
+  // Удаляем снизу вверх все строки, которые не вошли в keepRowIndexes
+  for (let i = rows.length - 1; i >= 1; i--) {
+    if (!keepRowIndexes.has(i)) {
+      sheet.deleteRow(i + 1);
+    }
   }
 }
 
