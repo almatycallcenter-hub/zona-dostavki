@@ -1075,8 +1075,14 @@ async function loadHistory() {
     const json = await res.json();
     if (!json.data?.length) { cont.innerHTML='<div style="text-align:center;padding:24px;color:var(--text3);font-size:13px;">История пуста</div>'; return; }
     cont.innerHTML=`<div class="tbl-wrap" style="overflow-x:auto;-webkit-overflow-scrolling:touch;"><table class="tbl">
-      <thead><tr><th>Дата</th><th>Оператор</th><th>Итого Kaspi</th><th>Дневные</th><th>Предоплаты</th><th>Транзакций</th><th>Статус</th></tr></thead>
-      <tbody>${json.data.slice().reverse().map(r=>`<tr>
+      <thead><tr><th>Дата</th><th>Оператор</th><th>Итого Kaspi</th><th>Дневные</th><th>Предоплаты</th><th>Транзакций</th><th>Статус кассы</th><th>Откл. iiko</th><th>Статус iiko</th></tr></thead>
+      <tbody>${json.data.slice().reverse().map(r=>{
+        const diffRaw = r['Расхождение iiko (₸)'];
+        const diffNum = Number(diffRaw);
+        const hasDiff = diffRaw !== '' && diffRaw != null && !isNaN(diffNum);
+        const diffTxt = hasDiff ? (diffNum===0 ? '0 ₸' : (diffNum>0?'+':'−') + Math.abs(diffNum).toLocaleString('ru-RU') + ' ₸') : '—';
+        const diffColor = !hasDiff ? 'var(--text3)' : diffNum===0 ? 'var(--green)' : 'var(--red)';
+        return `<tr>
         <td class="mo">${String(r['Дата']||'').slice(0,10)}</td>
         <td>${r['Оператор']||''}</td>
         <td class="mo" style="color:var(--text);">${Number(r['Итого Kaspi (₸)']||0).toLocaleString('ru-RU')} ₸</td>
@@ -1084,7 +1090,10 @@ async function loadHistory() {
         <td class="mo" style="color:var(--a2);">${Number(r['Предоплаты сегодня (₸)']||0).toLocaleString('ru-RU')} ₸</td>
         <td class="mo">${r['Кол-во транзакций']||''}</td>
         <td>${r['Статус сверки']||''}</td>
-      </tr>`).join('')}</tbody>
+        <td class="mo" style="color:${diffColor};">${diffTxt}</td>
+        <td>${r['Статус iiko']||'—'}</td>
+      </tr>`;
+      }).join('')}</tbody>
     </table></div>`;
   } catch(e) { cont.innerHTML=`<div style="text-align:center;padding:20px;color:var(--red);">Ошибка: ${e.message}</div>`; }
 }
