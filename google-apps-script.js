@@ -92,7 +92,7 @@ function saveShift(data) {
     : '—';
 
   const newRow = [
-    data.date        || '',
+    asText(data.date),
     data.operator    || '',
     kaspi, daily, prepToday, prepFuture, expIiko,
     actIiko || '', diffIiko,
@@ -148,12 +148,12 @@ function saveTransactions(data) {
 
   // Добавляем новые строки
   const newRows = (data.transactions || []).map(t => [
-    data.date     || '',
+    asText(data.date),
     data.operator || '',
     t.time        || '',
     t.amount      || 0,
     t.type === 'prepay' ? 'Предоплата' : t.type === 'daily' ? 'Дневной' : '—',
-    t.orderDate   || '',
+    asText(t.orderDate),
     t.client      || '',
     t.note        || ''
   ]);
@@ -234,15 +234,27 @@ function getTransactions(date) {
 }
 
 // ════════════════════════════════════════════════════════════
-//  Приводит значения дат к 'yyyy-MM-dd' (таблица иногда хранит
-//  их как объект Date, что при экспорте в JSON даёт ISO-строку
-//  со смещением по UTC вместо нужной календарной даты)
+//  Приводит значения дат к 'yyyy-MM-dd' (старые строки, сохранённые
+//  до фикса с apostrophe-префиксом, могли превратиться в объект Date —
+//  таблица интерпретирует текстовую дату по СВОЕМУ часовому поясу,
+//  поэтому для восстановления исходной даты берём именно его, а не
+//  Asia/Almaty)
 // ════════════════════════════════════════════════════════════
 function normalizeCell(header, value) {
   if (value instanceof Date && (header === 'Дата' || header === 'Дата заказа')) {
-    return Utilities.formatDate(value, 'Asia/Almaty', 'yyyy-MM-dd');
+    const tz = SpreadsheetApp.openById(SHEET_ID).getSpreadsheetTimeZone();
+    return Utilities.formatDate(value, tz, 'yyyy-MM-dd');
   }
   return value;
+}
+
+// ════════════════════════════════════════════════════════════
+//  Принудительно сохраняет значение как текст (апостроф — стандартный
+//  для Google Sheets маркер «не превращать в дату/число»; при чтении
+//  апостроф не виден и в значении не присутствует)
+// ════════════════════════════════════════════════════════════
+function asText(value) {
+  return value ? ("'" + value) : (value || '');
 }
 
 // ════════════════════════════════════════════════════════════
