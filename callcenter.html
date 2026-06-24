@@ -1080,7 +1080,7 @@ async function loadHistory() {
         const diffRaw = r['Расхождение iiko (₸)'];
         const diffNum = Number(diffRaw);
         const hasDiff = diffRaw !== '' && diffRaw != null && !isNaN(diffNum);
-        const diffTxt = hasDiff ? (diffNum===0 ? '0 ₸' : (diffNum>0?'−':'+') + Math.abs(diffNum).toLocaleString('ru-RU') + ' ₸') : '—';
+        const diffTxt = hasDiff ? (diffNum===0 ? '0 ₸' : (diffNum>0?'+':'−') + Math.abs(diffNum).toLocaleString('ru-RU') + ' ₸') : '—';
         const diffColor = !hasDiff ? 'var(--text3)' : diffNum===0 ? 'var(--green)' : 'var(--red)';
         return `<tr>
         <td class="mo">${String(r['Дата']||'').slice(0,10)}</td>
