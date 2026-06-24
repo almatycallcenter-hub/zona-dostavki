@@ -102,11 +102,14 @@ function saveShift(data) {
     new Date().toLocaleString('ru-RU')
   ];
 
+  // Столбец A хранится как текст, чтобы таблица не превращала дату в объект Date
+  sheet.getRange(2, 1, sheet.getMaxRows() - 1, 1).setNumberFormat('@');
+
   // Ищем существующую строку с такой же датой → заменяем
   const allRows = sheet.getDataRange().getValues();
   let replaced = false;
   for (let i = 1; i < allRows.length; i++) {
-    if (String(allRows[i][0]) === String(data.date)) {
+    if (String(normalizeCell('Дата', allRows[i][0])) === String(data.date)) {
       sheet.getRange(i + 1, 1, 1, newRow.length).setValues([newRow]);
       replaced = true;
       break;
@@ -131,10 +134,14 @@ function saveTransactions(data) {
     'Тип', 'Дата заказа', 'Клиент', 'Заметка'
   ]);
 
+  // Столбцы с датами хранятся как текст, чтобы таблица не превращала их в объект Date
+  sheet.getRange(2, 1, sheet.getMaxRows() - 1, 1).setNumberFormat('@');
+  sheet.getRange(2, 6, sheet.getMaxRows() - 1, 1).setNumberFormat('@');
+
   // Удаляем все строки за эту дату (снизу вверх, чтобы не сбить индексы)
   const allRows = sheet.getDataRange().getValues();
   for (let i = allRows.length - 1; i >= 1; i--) {
-    if (String(allRows[i][0]) === String(data.date)) {
+    if (String(normalizeCell('Дата', allRows[i][0])) === String(data.date)) {
       sheet.deleteRow(i + 1);
     }
   }
@@ -177,7 +184,7 @@ function getShifts() {
     const headers = rows[0];
     const data = rows.slice(1).map(row => {
       const obj = {};
-      headers.forEach((h, i) => obj[h] = row[i]);
+      headers.forEach((h, i) => obj[h] = normalizeCell(h, row[i]));
       return obj;
     });
 
@@ -200,10 +207,10 @@ function getTransactions(date) {
 
     const headers = rows[0];
     const data = rows.slice(1)
-      .filter(row => !date || String(row[0]) === date)
+      .filter(row => !date || String(normalizeCell(headers[0], row[0])) === date)
       .map(row => {
         const obj = {};
-        headers.forEach((h, i) => obj[h] = row[i]);
+        headers.forEach((h, i) => obj[h] = normalizeCell(h, row[i]));
         return obj;
       });
 
@@ -211,6 +218,18 @@ function getTransactions(date) {
   } catch (err) {
     return { status: 'error', message: err.message, data: [] };
   }
+}
+
+// ════════════════════════════════════════════════════════════
+//  Приводит значения дат к 'yyyy-MM-dd' (таблица иногда хранит
+//  их как объект Date, что при экспорте в JSON даёт ISO-строку
+//  со смещением по UTC вместо нужной календарной даты)
+// ════════════════════════════════════════════════════════════
+function normalizeCell(header, value) {
+  if (value instanceof Date && (header === 'Дата' || header === 'Дата заказа')) {
+    return Utilities.formatDate(value, 'Asia/Almaty', 'yyyy-MM-dd');
+  }
+  return value;
 }
 
 // ════════════════════════════════════════════════════════════
@@ -234,8 +253,8 @@ function getCarryoverPrepays(date) {
     const idxType      = headers.indexOf('Тип');
 
     const matches = rows.slice(1).filter(row =>
-      String(row[idxOrderDate]) === date &&   // заказ на нужную дату
-      String(row[idxDate])      <  date &&    // записано в прошлой смене
+      String(normalizeCell('Дата заказа', row[idxOrderDate])) === date &&   // заказ на нужную дату
+      String(normalizeCell('Дата', row[idxDate]))             <  date &&    // записано в прошлой смене
       row[idxType] === 'Предоплата'
     );
 
