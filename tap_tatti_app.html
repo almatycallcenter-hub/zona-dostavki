@@ -868,10 +868,12 @@ function loadAddrHistory(){
 }
 function saveToAddrHistory(label,lat,lon){
   if(!label) return;
-  let hist=loadAddrHistory().filter(h=>h.label!==label);
-  hist.unshift({label,lat,lon});
-  hist=hist.slice(0,8);
-  localStorage.setItem(ADDR_HIST_KEY, JSON.stringify(hist));
+  try{
+    let hist=loadAddrHistory().filter(h=>h.label!==label);
+    hist.unshift({label,lat,lon});
+    hist=hist.slice(0,8);
+    localStorage.setItem(ADDR_HIST_KEY, JSON.stringify(hist));
+  }catch(e){}
 }
 function showAddrHistory(){
   const hist=loadAddrHistory();
@@ -1270,8 +1272,8 @@ const DEMO = {
 };
 let kTxns=[], kStates={}, kMeta={}, kFilter='all';
 const kFmt = n => n.toLocaleString('ru-RU')+' ₸';
-const ls = key => localStorage.getItem(key);
-const lss = (k,v) => localStorage.setItem(k,v);
+const ls = key => { try{ return localStorage.getItem(key); }catch(e){ return null; } };
+const lss = (k,v) => { try{ localStorage.setItem(k,v); }catch(e){} };
 
 function initKaspiApp() {
   updateKClock();
