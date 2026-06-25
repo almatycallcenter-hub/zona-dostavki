@@ -153,6 +153,10 @@ body { font-family:'Segoe UI',Arial,sans-serif; background:#f7f7f7; }
   width:24px; height:24px; display:flex; align-items:center; justify-content:center;
   font-size:11px; font-weight:800; border:2px solid white;
   box-shadow:0 2px 6px rgba(0,0,0,0.3); }
+.mk-cex { background:#1d1d1d; color:white; border-radius:6px;
+  width:auto; height:22px; padding:0 7px; display:flex; align-items:center; justify-content:center;
+  font-size:10px; font-weight:800; letter-spacing:.5px; border:2px solid white;
+  box-shadow:0 2px 6px rgba(0,0,0,0.3); white-space:nowrap; }
 
 
 /* ══════════════════════════════
@@ -697,6 +701,7 @@ const BRANCHES = [
   {id:7,name:"Райымбек батыра", addr:"ул. Райымбек батыра, 168Б",  dist:"Медеу/Бесагаш",  lat:43.291163,  lng:77.013177 },
   {id:8,name:"Шұғыла",          addr:"мкр. Шұғыла, 340/35 к15",    dist:"Наурызбай",       lat:43.210774,  lng:76.789496 },
   {id:9,name:"Алтын Орда",      addr:"ул. Алтын Орда, 6/40а/к1",   dist:"Наурызбай",       lat:43.217577,  lng:76.777380 },
+  {id:10,name:"Цех",            addr:"Цех",                        dist:"Әуезов",          lat:43.208719,  lng:76.880393,  isCex:true},
 ];
 const ZONES=[
   [1000,"до 1 км",    1462.68,14627],
@@ -725,7 +730,9 @@ const routeLines=[];
 let destMarker=null;
 
 BRANCHES.forEach(b=>{
-  const icon=L.divIcon({className:'',html:`<div class="mk">${b.id}</div>`,iconSize:[24,24],iconAnchor:[12,12],popupAnchor:[0,-14]});
+  const icon=b.isCex
+    ? L.divIcon({className:'',html:`<div class="mk-cex">ЦЕХ</div>`,iconSize:[44,22],iconAnchor:[22,11],popupAnchor:[0,-14]})
+    : L.divIcon({className:'',html:`<div class="mk">${b.id}</div>`,iconSize:[24,24],iconAnchor:[12,12],popupAnchor:[0,-14]});
   bMarkers[b.id]=L.marker([b.lat,b.lng],{icon}).addTo(map)
     .bindPopup(`<b>${b.name}</b><br><small>${b.addr}</small>`);
 });
