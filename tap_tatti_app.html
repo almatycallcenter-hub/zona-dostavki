@@ -893,6 +893,12 @@ function cleanQ(q){
     .replace(/блок\s*[\dА-Яа-яA-Za-z]+/gi,'')
     .replace(/корп\w*\.?\s*[\dА-Яа-яA-Za-z]+/gi,'')
     .replace(/кв\.?\s*\d+/gi,'')
+    .replace(/квартира\s*\d+/gi,'')
+    .replace(/\d+\s*кв(?:артира\w*|\.)?\b/gi,'')
+    .replace(/\d+\s*под[ъь]?езд\w*/gi,'')
+    .replace(/под[ъь]?езд\w*\s*\d+/gi,'')
+    .replace(/\d+\s*эт(?:аж\w*|\.)/gi,'')
+    .replace(/эт(?:аж\w*|\.)\s*\d+/gi,'')
     .replace(/,\s*,/g,',').replace(/\s+/g,' ').trim().replace(/^[,\s]+|[,\s]+$/g,'');
 }
 
