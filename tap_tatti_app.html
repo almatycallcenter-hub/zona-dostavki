@@ -846,11 +846,39 @@ let sugTimer=null;
 inp.addEventListener('input',()=>{
   clearTimeout(sugTimer);
   const q=inp.value.trim();
+  if(!q){ showAddrHistory(); return; }
   if(q.length<3){sugs.style.display='none';return;}
   sugTimer=setTimeout(()=>fetchSugs(q),450);
 });
+inp.addEventListener('focus',()=>{ if(!inp.value.trim()) showAddrHistory(); });
 inp.addEventListener('keydown',e=>{ if(e.key==='Enter'){sugs.style.display='none';doSearch();} });
 document.addEventListener('click',e=>{ if(!e.target.closest('#search-wrap')) sugs.style.display='none'; });
+
+// История адресов (как «недавние» в 2ГИС) — последние выбранные адреса, хранятся в браузере
+const ADDR_HIST_KEY='addrSearchHistory';
+function loadAddrHistory(){
+  try{ return JSON.parse(localStorage.getItem(ADDR_HIST_KEY)||'[]'); }catch(e){ return []; }
+}
+function saveToAddrHistory(label,lat,lon){
+  if(!label) return;
+  let hist=loadAddrHistory().filter(h=>h.label!==label);
+  hist.unshift({label,lat,lon});
+  hist=hist.slice(0,8);
+  localStorage.setItem(ADDR_HIST_KEY, JSON.stringify(hist));
+}
+function showAddrHistory(){
+  const hist=loadAddrHistory();
+  if(!hist.length){ sugs.style.display='none'; return; }
+  sugs.innerHTML=hist.map(h=>
+    `<div class="sug-item" data-lat="${h.lat}" data-lon="${h.lon}" data-name="${h.label}">🕐 ${h.label}</div>`
+  ).join('');
+  sugs.style.display='block';
+  sugs.querySelectorAll('.sug-item').forEach(el=>el.addEventListener('click',()=>{
+    inp.value=el.dataset.name;
+    sugs.style.display='none';
+    setDestination(+el.dataset.lat,+el.dataset.lon,el.dataset.name);
+  }));
+}
 
 function cleanQ(q){
   return q
@@ -924,6 +952,7 @@ async function fetchSugs(q){
     sugs.querySelectorAll('.sug-item').forEach(el=>el.addEventListener('click',()=>{
       inp.value=el.dataset.name;
       sugs.style.display='none';
+      saveToAddrHistory(el.dataset.name,+el.dataset.lat,+el.dataset.lon);
       setDestination(+el.dataset.lat,+el.dataset.lon,el.dataset.name);
     }));
   }catch(e){}
@@ -937,7 +966,9 @@ async function doSearch(){
     const results=await geoSearch(q);
     if(!results.length){ alert('Адрес не найден. Попробуйте кликнуть на карту'); return; }
     const d=results[0];
-    setDestination(d.lat,d.lon,featureLabel(d)||d.display_name);
+    const label=featureLabel(d)||d.display_name;
+    saveToAddrHistory(label,d.lat,d.lon);
+    setDestination(d.lat,d.lon,label);
   }catch(e){
     alert('Ошибка: '+e.message);
   }finally{
