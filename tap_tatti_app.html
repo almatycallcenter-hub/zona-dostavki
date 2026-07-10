@@ -184,8 +184,10 @@ body { font-family:'Segoe UI',Arial,sans-serif; background:#f7f7f7; }
 #searchInput:focus { border-color:var(--gold); }
 #searchInput::placeholder { color:var(--muted); }
 .filters {
-  display:flex; gap:7px; overflow-x:auto; padding:10px 20px 0;
+  display:flex; gap:7px; overflow-x:auto; padding:10px 20px 8px;
   scrollbar-width:none; background:var(--bg);
+  position:sticky; top:var(--cat-header-h, 88px); z-index:90;
+  border-bottom:1px solid var(--border);
 }
 .filters::-webkit-scrollbar { display:none; }
 .filter-btn {
