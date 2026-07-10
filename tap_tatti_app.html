@@ -1184,9 +1184,45 @@ const products = [
   {name:"Сет Шанырак", cat:"Сет", weight:"17 500 ₸", dims:{}, desc:"Шығыс самсасы ет 5дн · тауық 5дн · Бауырсақ 1кг · Мини-муравейник 6дн · Бөрек ет/тауық 4дн · Бөрек картоп/алма 4дн · Торт 1дн", shelf:"—"},
 ];
 
-const categories = [...new Set(products.map(p => p.cat))];
+// Пытаемся загрузить каталог из Google Sheets; если не удаётся — используем встроенный
 let activeFilter = 'Барлығы';
 let expandedIdx = null;
+
+async function loadProductsFromSheet() {
+  const url = lss('scriptUrl');
+  if (!url) return;
+  try {
+    const r = await fetch(url + '?action=getProducts');
+    const j = await r.json();
+    if (j.status === 'ok' && j.data && j.data.length > 0) {
+      products.length = 0;
+      j.data.forEach(p => products.push(p));
+      renderCatalog();
+    }
+  } catch(e) {}
+}
+
+function renderCatalog() {
+  const cats = [...new Set(products.map(p => p.cat))];
+  const filtersEl = document.getElementById('filters');
+  if (filtersEl) {
+    filtersEl.innerHTML = '';
+    ['Барлығы', ...cats].forEach(cat => {
+      const btn = document.createElement('button');
+      btn.className = 'filter-btn' + (cat === activeFilter ? ' active' : '');
+      btn.textContent = cat;
+      btn.onclick = () => {
+        activeFilter = cat; expandedIdx = null;
+        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active'); applyFilters();
+      };
+      filtersEl.appendChild(btn);
+    });
+  }
+  applyFilters();
+}
+
+document.addEventListener('DOMContentLoaded', () => { loadProductsFromSheet(); });
 
 function formatDims(dims) {
   const entries = Object.entries(dims);

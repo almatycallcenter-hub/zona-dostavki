@@ -37,6 +37,10 @@ function doGet(e) {
     return jsonResponse(getCarryoverPrepays(date));
   }
 
+  if (action === 'getProducts') {
+    return jsonResponse(getProducts());
+  }
+
   return jsonResponse({ status: 'ok', message: 'ТӘП-ТӘТТІ API работает' });
 }
 
@@ -102,26 +106,41 @@ function saveShift(data) {
     new Date().toLocaleString('ru-RU')
   ];
 
-  // Столбец A хранится как текст, чтобы таблица не превращала дату в объект Date
-  sheet.getRange(2, 1, sheet.getMaxRows() - 1, 1).setNumberFormat('@');
-
-  // Ищем существующую строку с такой же датой → заменяем
+  // Ищем существующую строку с такой же датой → заменяем, иначе добавляем
+  const tz = SpreadsheetApp.openById(SHEET_ID).getSpreadsheetTimeZone();
   const allRows = sheet.getDataRange().getValues();
-  let replaced = false;
-  for (let i = 1; i < allRows.length; i++) {
-    if (String(normalizeCell('Дата', allRows[i][0])) === String(data.date)) {
-      sheet.getRange(i + 1, 1, 1, newRow.length).setValues([newRow]);
-      replaced = true;
-      break;
-    }
-  }
-  if (!replaced) sheet.appendRow(newRow);
+  let dataRows = allRows.slice(1);
 
-  // Сортируем по дате по возрастанию (столбец A, пропускаем заголовок)
-  const lastRow = sheet.getLastRow();
-  if (lastRow > 2) {
-    sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn())
-      .sort({ column: 1, ascending: true });
+  const idx = dataRows.findIndex(r => String(normalizeCell('Дата', r[0])) === String(data.date));
+  if (idx !== -1) {
+    dataRows[idx] = newRow;
+  } else {
+    dataRows.push(newRow);
+  }
+
+  // Нормализуем дату (колонка 0) каждой строки → чистая текстовая строка yyyy-MM-dd
+  dataRows = dataRows.map(r => {
+    const raw = r[0];
+    const dateStr = raw instanceof Date
+      ? Utilities.formatDate(raw, tz, 'yyyy-MM-dd')
+      : String(raw).replace(/^'/, '').trim();
+    return [dateStr, ...r.slice(1)];
+  });
+
+  // Сортируем в JS по дате (ISO-строки сравниваются корректно)
+  dataRows.sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+
+  // Перезаписываем лист: очищаем старые данные, пишем отсортированные
+  const lastRowOld = sheet.getLastRow();
+  const numCols = sheet.getLastColumn();
+  if (lastRowOld > 1) {
+    sheet.getRange(2, 1, lastRowOld - 1, numCols).clearContent();
+  }
+  SpreadsheetApp.flush();
+
+  if (dataRows.length > 0) {
+    const withPrefix = dataRows.map(r => ["'" + r[0], ...r.slice(1)]);
+    sheet.getRange(2, 1, withPrefix.length, withPrefix[0].length).setNumberFormat('@').setValues(withPrefix);
   }
 }
 
@@ -327,6 +346,60 @@ function cleanupDuplicateShifts() {
 }
 
 // ════════════════════════════════════════════════════════════
+//  Каталог продуктов — чтение и запись листа «Каталог»
+// ════════════════════════════════════════════════════════════
+function getProducts() {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    let sheet = ss.getSheetByName('Каталог');
+    if (!sheet) return { status: 'ok', data: [] };
+
+    const rows = sheet.getDataRange().getValues();
+    if (rows.length <= 1) return { status: 'ok', data: [] };
+
+    const data = rows.slice(1)
+      .filter(r => r[7] !== false && String(r[7]).toLowerCase() !== 'false' && String(r[7]) !== '0')
+      .map(r => {
+        let dims = {};
+        try { dims = r[3] ? JSON.parse(r[3]) : {}; } catch(e) {}
+        return {
+          name:   String(r[0] || ''),
+          cat:    String(r[1] || ''),
+          weight: String(r[2] || ''),
+          dims,
+          ingr:   String(r[4] || ''),
+          desc:   String(r[5] || ''),
+          shelf:  String(r[6] || '')
+        };
+      });
+
+    return { status: 'ok', data };
+  } catch(err) {
+    return { status: 'error', message: err.message, data: [] };
+  }
+}
+
+function initCatalogSheet() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  let sheet = ss.getSheetByName('Каталог');
+  if (sheet) { SpreadsheetApp.getUi().alert('Лист «Каталог» уже существует.'); return; }
+
+  sheet = ss.insertSheet('Каталог');
+  const headers = ['Атауы (название)', 'Категория', 'Салмақ (вес)', 'Өлшемдер JSON', 'Құрамы (состав)', 'Сипаттамасы (описание)', 'Сақтау (срок хранения)', 'Белсенді (TRUE/FALSE)'];
+  sheet.appendRow(headers);
+  const hr = sheet.getRange(1, 1, 1, headers.length);
+  hr.setBackground('#1a237e').setFontColor('#ffffff').setFontWeight('bold');
+  sheet.setFrozenRows(1);
+  sheet.setColumnWidth(1, 280);
+  sheet.setColumnWidth(2, 140);
+  sheet.setColumnWidth(4, 220);
+  sheet.setColumnWidth(5, 300);
+  sheet.setColumnWidth(6, 300);
+  sheet.setColumnWidth(7, 200);
+  SpreadsheetApp.getUi().alert('Лист «Каталог» создан! Теперь запустите функцию fillCatalogFromCode чтобы заполнить его текущими продуктами.');
+}
+
+// ════════════════════════════════════════════════════════════
 //  Вспомогательные функции
 // ════════════════════════════════════════════════════════════
 function getOrCreateSheet(name, headers) {
@@ -355,4 +428,84 @@ function jsonResponse(obj) {
 
 function formatNum(n) {
   return Number(n).toLocaleString('ru-RU');
+}
+
+// ════════════════════════════════════════════════════════════
+//  Разовый сдвиг всех дат на +1 день в листах «Смены» и «Транзакции»
+//  Запустить вручную: выбрать shiftAllDatesForward и нажать ▶ Выполнить
+// ════════════════════════════════════════════════════════════
+function shiftAllDatesForward() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const tz = ss.getSpreadsheetTimeZone();
+
+  function shiftSheet(sheetName, dateColumns) {
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) return;
+    const rows = sheet.getDataRange().getValues();
+    if (rows.length <= 1) return;
+    const headers = rows[0];
+    const colIndexes = dateColumns.map(h => headers.indexOf(h));
+
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      colIndexes.forEach(ci => {
+        if (ci === -1) return;
+        const raw = row[ci];
+        let dateStr = raw instanceof Date
+          ? Utilities.formatDate(raw, tz, 'yyyy-MM-dd')
+          : String(raw).trim();
+        if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+          const d = new Date(dateStr + 'T00:00:00Z');
+          d.setUTCDate(d.getUTCDate() + 1);
+          const shifted = Utilities.formatDate(d, 'UTC', 'yyyy-MM-dd');
+          sheet.getRange(i + 1, ci + 1).setNumberFormat('@').setValue("'" + shifted);
+        }
+      });
+    }
+  }
+
+  shiftSheet(SHEET_SHIFTS,       ['Дата']);
+  shiftSheet(SHEET_TRANSACTIONS, ['Дата', 'Дата заказа']);
+
+  SpreadsheetApp.getUi().alert('Готово! Все даты сдвинуты на +1 день.');
+}
+
+// ════════════════════════════════════════════════════════════
+//  Сдвиг всех дат на -1 день (отмена предыдущего сдвига)
+//  Запустить вручную: выбрать shiftAllDatesBackward и нажать ▶ Выполнить
+// ════════════════════════════════════════════════════════════
+function shiftAllDatesBackward() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const tz = ss.getSpreadsheetTimeZone();
+
+  function shiftSheet(sheetName, dateColumns) {
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) return;
+    const rows = sheet.getDataRange().getValues();
+    if (rows.length <= 1) return;
+    const headers = rows[0];
+    const colIndexes = dateColumns.map(h => headers.indexOf(h));
+
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      colIndexes.forEach(ci => {
+        if (ci === -1) return;
+        const raw = row[ci];
+        let dateStr = raw instanceof Date
+          ? Utilities.formatDate(raw, tz, 'yyyy-MM-dd')
+          : String(raw).trim();
+        if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+          const d = new Date(dateStr + 'T00:00:00Z');
+          d.setUTCDate(d.getUTCDate() - 1);
+          const shifted = Utilities.formatDate(d, 'UTC', 'yyyy-MM-dd');
+          sheet.getRange(i + 1, ci + 1).setNumberFormat('@').setValue("'" + shifted);
+        }
+      });
+    }
+  }
+
+  shiftSheet(SHEET_SHIFTS,       ['Дата']);
+  shiftSheet(SHEET_TRANSACTIONS, ['Дата', 'Дата заказа']);
+
+  SpreadsheetApp.getUi().alert('Готово! Все даты сдвинуты на -1 день.');
 }
