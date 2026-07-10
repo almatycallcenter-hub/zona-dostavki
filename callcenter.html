@@ -1299,7 +1299,8 @@ function updateOpSelect() {
 document.addEventListener('DOMContentLoaded', () => {
   initClock();
   const url = ls('scriptUrl');
-  if(url){ document.getElementById('scriptUrl').value=url; updateConnBadge(true); }
+  if(url && url !== 'undefined'){ document.getElementById('scriptUrl').value=url; updateConnBadge(true); }
+  else if(url === 'undefined'){ localStorage.removeItem('scriptUrl'); }
   const ops = ls('operators');
   if(ops) updateOpSelect();
 });

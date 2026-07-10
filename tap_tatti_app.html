@@ -1190,8 +1190,8 @@ let activeFilter = 'Барлығы';
 let expandedIdx = null;
 
 async function loadProductsFromSheet() {
-  const url = lss('scriptUrl');
-  if (!url) return;
+  const url = ls('scriptUrl');
+  if (!url || url === 'undefined') return;
   try {
     const r = await fetch(url + '?action=getProducts');
     const j = await r.json();
