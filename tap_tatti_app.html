@@ -1185,6 +1185,7 @@ const products = [
 ];
 
 // Пытаемся загрузить каталог из Google Sheets; если не удаётся — используем встроенный
+const categories = [...new Set(products.map(p => p.cat))];
 let activeFilter = 'Барлығы';
 let expandedIdx = null;
 
