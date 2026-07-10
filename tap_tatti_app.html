@@ -854,8 +854,8 @@ inp.addEventListener('input',()=>{
   clearTimeout(sugTimer);
   const q=inp.value.trim();
   if(!q){ showAddrHistory(); return; }
-  if(q.length<3){sugs.style.display='none';return;}
-  sugTimer=setTimeout(()=>fetchSugs(q),450);
+  if(q.length<4){sugs.style.display='none';return;}
+  sugTimer=setTimeout(()=>fetchSugs(q),800);
 });
 inp.addEventListener('focus',()=>{ if(!inp.value.trim()) showAddrHistory(); });
 inp.addEventListener('keydown',e=>{ if(e.key==='Enter'){sugs.style.display='none';doSearch();} });
