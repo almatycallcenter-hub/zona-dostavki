@@ -257,11 +257,9 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 @media(max-width:700px){
   :root { --sidebar:0px; }
 
-  /* Sidebar → скрыть, заменить нижней навигацией */
   #sidebar { display:none; }
   #main { margin-left:0; padding-bottom:calc(60px + env(safe-area-inset-bottom)); }
 
-  /* Нижняя навигация */
   #mob-nav {
     display:flex !important;
     position:fixed; bottom:0; left:0; right:0; z-index:200;
@@ -280,17 +278,14 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
   .mob-nav-btn.active { color:var(--a2); }
   .mob-nav-btn:active { opacity:.7; }
 
-  /* Страница */
   .page-header { padding:12px 16px; }
   .page-body   { padding:12px 16px; max-width:100%; }
   .page-title  { font-size:15px; }
 
-  /* Форма смены — стек */
   .frow { flex-direction:column; gap:10px; }
   .frow .fg { width:100% !important; }
   .frow .fi { width:100% !important; }
 
-  /* KPI карточки — горизонтальный скролл */
   .kpi-row {
     display:flex; overflow-x:auto; gap:10px; padding-bottom:4px;
     scrollbar-width:none; -webkit-overflow-scrolling:touch;
@@ -300,14 +295,11 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
   .kpi-row::-webkit-scrollbar { display:none; }
   .kpi { min-width:140px; flex-shrink:0; }
 
-  /* Карточки */
   .card { padding:14px; margin-bottom:12px; }
   .card-head { margin-bottom:12px; }
 
-  /* G2 → 1 колонка */
   .g2 { grid-template-columns:1fr; gap:12px; }
 
-  /* Транзакции — больше tap-зоны */
   .txn-item { padding:12px; gap:12px; }
   .txn-time { font-size:11px; width:42px; }
   .txn-amt  { font-size:15px; }
@@ -315,48 +307,38 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
   .txn-chk  { width:24px; height:24px; font-size:12px; }
   .txn-tag  { font-size:11px; padding:3px 9px; }
 
-  /* Тулбар транзакций */
   .txn-toolbar { flex-direction:column; align-items:stretch; gap:8px; }
   .txn-filters { flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; padding-bottom:2px; }
   .txn-filters::-webkit-scrollbar { display:none; }
   .filter-pill { white-space:nowrap; flex-shrink:0; padding:6px 13px; font-size:12px; }
 
-  /* Кнопки */
   .btn { padding:10px 18px; font-size:14px; }
   #closeBtn { width:100%; justify-content:center; font-size:15px; padding:13px; }
 
-  /* Сверка */
   .sv-label { font-size:12px; }
   .sv-val   { font-size:13px; }
   .sv-total .sv-val { font-size:16px; }
 
-  /* Upload zone */
   .upload-zone { padding:20px 16px; }
 
-  /* Статус-бокс */
   .status-box { padding:10px 14px; }
   .s-title { font-size:13px; }
   .s-sub   { font-size:11px; }
 
-  /* Модули на главной */
   .modules-grid { grid-template-columns:1fr 1fr; gap:10px; }
   .module-card  { padding:14px; }
   .mc-icon  { font-size:26px; margin-bottom:8px; }
   .mc-title { font-size:13px; }
   .mc-sub   { font-size:11px; }
 
-  /* Таблица истории — скролл */
   .tbl-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
   .tbl td, .tbl thead th { font-size:11px; padding:8px 8px; white-space:nowrap; }
 
-  /* Настройки — поля на всю ширину */
   #page-settings .fi { width:100% !important; }
   #page-settings .frow { flex-direction:column; }
 
-  /* iiko input на всю ширину */
   #iikoActual { width:100% !important; }
 
-  /* Предоплата дата */
   .txn-pp-row { flex-direction:column; gap:6px; }
   .txn-pp-date { width:100%; }
 }
@@ -685,11 +667,9 @@ function go(id) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
   document.getElementById('page-' + id).classList.add('active');
-  // Desktop nav
   document.querySelectorAll('.nav-item').forEach(b => {
     if (b.getAttribute('onclick') === `go('${id}')`) b.classList.add('active');
   });
-  // Mobile bottom nav
   document.querySelectorAll('.mob-nav-btn').forEach(b => b.classList.remove('active'));
   const mb = document.getElementById('mn-' + id);
   if (mb) mb.classList.add('active');
@@ -704,7 +684,6 @@ function initClock() {
     const n = new Date();
     const p = x => String(x).padStart(2,'0');
     document.getElementById('sbClock').textContent = `${p(n.getHours())}:${p(n.getMinutes())}:${p(n.getSeconds())}`;
-    // Greeting
     const h = n.getHours();
     const gEl = document.getElementById('greetText');
     if (gEl) gEl.textContent = h < 12 ? 'Доброе утро! ☀️' : h < 17 ? 'Добрый день! 👋' : 'Добрый вечер! 🌙';
@@ -1042,7 +1021,7 @@ function loadCarryoverPrepays(date) {
   window._carryoverCount = 0;
   if (!date) { renderIiko(); return; }
 
-  // Из localStorage
+  // Из localStorage (быстрый локальный прикид, пока грузится GAS)
   const stored = JSON.parse(ls('carryoverPrepays') || '[]');
   const relevant = stored.filter(p => p.orderDate === date && p.shiftDate < date);
   window._carryoverAmt   = relevant.reduce((s, p) => s + p.amount, 0);
@@ -1050,13 +1029,15 @@ function loadCarryoverPrepays(date) {
 
   renderIiko();
 
-  // Также проверяем GAS (если настроен) — может дополнить данными с другого устройства
+  // Google Таблица — источник истины. Если подключена, её значение
+  // ВСЕГДА заменяет локальное (а не берётся "по максимуму"), потому что
+  // localStorage телефона может содержать устаревшие/задвоенные записи.
   const url = ls('scriptUrl');
   if (!url) return;
   fetch(url + '?action=getCarryoverPrepays&date=' + date)
     .then(r => r.json())
     .then(json => {
-      if (json.status === 'ok' && json.total > window._carryoverAmt) {
+      if (json.status === 'ok') {
         window._carryoverAmt   = json.total;
         window._carryoverCount = json.count;
         renderIiko();
@@ -1105,7 +1086,6 @@ document.getElementById('kFile').addEventListener('change', async function(e){
   uz.innerHTML=`<div style="font-size:28px;margin-bottom:8px;">⏳</div><div style="font-size:14px;font-weight:600;">Читаем PDF…</div><div style="font-size:12px;color:var(--text3);margin-top:4px;">${f.name}</div>`;
   try {
     const result = await parsePDF(f);
-    // Always show debug button
     const debugBtn = `<button onclick="showPdfDebug()" style="margin-top:10px;background:none;border:1px solid var(--border);color:var(--text3);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;">🔍 Показать текст PDF</button>`;
     if (!result.txns.length) {
       uz.innerHTML=`<div style="font-size:28px;margin-bottom:8px;">⚠️</div><div style="font-size:14px;font-weight:600;">Транзакции не найдены</div><div style="font-size:12px;color:var(--yellow);margin-top:6px;">Формат PDF не распознан</div>${debugBtn}`;
@@ -1160,7 +1140,6 @@ async function parsePDF(file) {
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
-    // Group items by Y-position (same line) to preserve line structure
     const byLine = {};
     content.items.forEach(it => {
       const y = Math.round(it.transform[5]);
@@ -1177,7 +1156,6 @@ async function parsePDF(file) {
 }
 
 function parseKaspiText(text) {
-  // Date: DD.MM.YY or DD.MM.YYYY → YYYY-MM-DD
   let date = '';
   const dateM = text.match(/(\d{2})\.(\d{2})\.(\d{2,4})/);
   if (dateM) {
@@ -1188,8 +1166,6 @@ function parseKaspiText(text) {
   const txns = [];
   let id = 1;
 
-  // Strategy 1: Kaspi format "HH:MM:SS   10 100 ₸" или "HH:MM:SS   Возврат   - 22 500 ₸"
-  // Amount may be split across PDF items, so collect digits/spaces before ₸
   const re1 = /(\d{2}:\d{2}:\d{2})\s+(Возврат\s+)?(-\s*)?([\d][\d\s]{0,12})(?:₸|тг|KZT)/gi;
   let m;
   while ((m = re1.exec(text)) !== null) {
@@ -1202,7 +1178,6 @@ function parseKaspiText(text) {
     }
   }
 
-  // Strategy 2: looser — find time, then scan next 60 chars for number before ₸
   if (!txns.length) {
     const re2 = /(\d{2}:\d{2}:\d{2})/g;
     while ((m = re2.exec(text)) !== null) {
@@ -1220,7 +1195,6 @@ function parseKaspiText(text) {
     }
   }
 
-  // Strategy 3: amounts formatted with comma "9 600,00 ₸"
   if (!txns.length) {
     const re3 = /(\d{2}:\d{2}:\d{2})\D{0,50}?(Возврат\D{0,10})?(-\s*)?(\d[\d\s]*[,\.]\d{2})/g;
     while ((m = re3.exec(text)) !== null) {
