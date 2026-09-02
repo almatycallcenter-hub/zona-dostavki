@@ -892,7 +892,9 @@ function iikoCellToDT(v) {
     return `${v.getFullYear()}-${p(v.getMonth()+1)}-${p(v.getDate())} ${p(v.getHours())}:${p(v.getMinutes())}:${p(v.getSeconds())}`;
   }
   if (typeof v === 'number') {
-    const d = new Date(Math.round((v - 25569) * 86400 * 1000));
+    // Серийное число Excel → дата. Только UTC-арифметика, без часового пояса
+    // устройства: иначе дата-без-времени съезжает на предыдущий день.
+    const d = new Date(Math.round((v - 25569) * 86400) * 1000);
     return `${d.getUTCFullYear()}-${p(d.getUTCMonth()+1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
   }
   const s = String(v).trim();
@@ -1023,7 +1025,7 @@ function initIikoUpload() {
     z.innerHTML = '<div style="font-size:22px;">⏳</div><div style="font-size:12px;">Читаем отчёт…</div>';
     try {
       const buf = await f.arrayBuffer();
-      const wb = XLSX.read(buf, { type:'array', cellDates:true });
+      const wb = XLSX.read(buf, { type:'array' });   // без cellDates — даты приходят серийными числами
       const ws = wb.Sheets[wb.SheetNames[0]];
       const aoa = XLSX.utils.sheet_to_json(ws, { header:1, raw:true, defval:null, blankrows:true });
       iikoOrders = parseIikoAoa(aoa);
