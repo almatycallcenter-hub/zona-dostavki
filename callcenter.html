@@ -573,8 +573,8 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
                 <div class="sv-label">🟢 Дневные заказы</div>
                 <div class="sv-val" id="iiko-daily" style="color:var(--green);">0 ₸</div>
               </div>
-              <div class="sv-row">
-                <div class="sv-label">🔵 Предоплаты за сегодня</div>
+              <div class="sv-row" id="iiko-today-row" style="display:none;">
+                <div class="sv-label">🔵 Предоплаты за сегодня <span style="font-weight:400;color:var(--text3);font-size:11px;">(размечены вручную)</span></div>
                 <div class="sv-val" id="iiko-today" style="color:var(--a2);">0 ₸</div>
               </div>
               <div class="sv-row" id="iiko-carryover-row" style="display:none;">
@@ -1129,6 +1129,7 @@ function renderIiko() {
   const expected = totalKaspi + carryAmt - futurePrepayAmt;
 
   el('iiko-daily').textContent    = kFmt(dailyAmt);
+  el('iiko-today-row').style.display = todayPrepayAmt ? '' : 'none';
   el('iiko-today').textContent    = todayPrepayAmt ? `${kFmt(todayPrepayAmt)} (${todayPrepays.length} шт)` : '0 ₸';
   el('iiko-future').textContent   = futurePrepayAmt ? `${kFmt(futurePrepayAmt)} (${futurePrepays.length} шт)` : '0 ₸';
   el('iiko-expected').textContent = kFmt(expected);
