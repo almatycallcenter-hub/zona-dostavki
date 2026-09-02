@@ -415,7 +415,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
       <div class="module-card" onclick="go('kaspi')">
         <div class="mc-icon">💳</div>
         <div class="mc-title">Касса</div>
-        <div class="mc-sub">Сверка Kaspi Pay по сменам. Сопоставление с iiko по дате принятия заказа.</div>
+        <div class="mc-sub">Сверка Kaspi Pay по сменам. Сопоставление заказов iiko по дате принятия.</div>
         <span class="mc-badge mc-active">Открыть</span>
       </div>
       <div class="module-card" onclick="openApp('calc')">
@@ -444,7 +444,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 <!-- КАССА ───────────────────────────── -->
 <div class="page" id="page-kaspi">
   <div class="page-header">
-    <div><div class="page-title">💳 Сверка кассы</div><div class="page-sub">Kaspi Pay · сверка с iiko по дате принятия заказа</div></div>
+    <div><div class="page-title">💳 Сверка кассы</div><div class="page-sub">Kaspi Pay · разметка транзакций · сопоставление с iiko</div></div>
     <button class="btn btn-o btn-sm" onclick="resetKaspi()">↺ Новая смена</button>
   </div>
   <div class="page-body">
@@ -550,7 +550,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
             <div class="card-head">
               <div>
                 <div class="card-title">🟡 Сверка с iiko</div>
-                <div style="font-size:11px;color:var(--text3);margin-top:2px;">по дате принятия заказа</div>
+                <div style="font-size:11px;color:var(--text3);margin-top:2px;">формула по учётному дню · сопоставление заказов по дате принятия</div>
               </div>
               <span class="badge" id="iikoBadge" style="background:var(--ybg);color:var(--yellow);">Ожидание</span>
             </div>
@@ -567,36 +567,41 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 
             <div id="iikoWarn" style="display:none;font-size:12px;background:var(--ybg);color:var(--yellow);border-radius:8px;padding:10px 12px;margin-bottom:12px;"></div>
 
-            <!-- Формула -->
+            <!-- Формула (всё авто) -->
             <div class="sv-box" style="margin-bottom:12px;">
               <div class="sv-row">
-                <div class="sv-label">🟢 Дневные заказы (доставка сегодня)</div>
+                <div class="sv-label">🟢 Дневные заказы</div>
                 <div class="sv-val" id="iiko-daily" style="color:var(--green);">0 ₸</div>
               </div>
               <div class="sv-row">
-                <div class="sv-label">🔵 Предоплаты (доставка позже)</div>
-                <div class="sv-val" id="iiko-future" style="color:var(--a2);">0 ₸</div>
+                <div class="sv-label">🔵 Предоплаты за сегодня</div>
+                <div class="sv-val" id="iiko-today" style="color:var(--a2);">0 ₸</div>
+              </div>
+              <div class="sv-row" id="iiko-carryover-row" style="display:none;">
+                <div class="sv-label">🔄 Перенос из прошлых смен</div>
+                <div class="sv-val" id="iiko-carryover" style="color:var(--a2);">0 ₸</div>
+              </div>
+              <div class="sv-row">
+                <div class="sv-label" style="color:var(--text3);">🔵 Предоплаты за будущую дату</div>
+                <div class="sv-val" id="iiko-future" style="color:var(--text3);">0 ₸</div>
               </div>
               <div class="sv-row" id="iiko-unset-row" style="display:none;">
-                <div class="sv-label" style="color:var(--text3);">⚪ Не размечено</div>
-                <div class="sv-val" id="iiko-unset" style="color:var(--text3);">0 ₸</div>
+                <div class="sv-label" style="color:var(--yellow);">⚪ Не размечено</div>
+                <div class="sv-val" id="iiko-unset" style="color:var(--yellow);">0 ₸</div>
               </div>
               <div class="divider"></div>
               <div class="sv-row sv-total">
-                <div class="sv-label">📊 Ожидаемый iiko <span style="font-weight:400;color:var(--text3);font-size:11px;">(вся касса смены)</span></div>
+                <div class="sv-label">📊 Ожидаемый iiko</div>
                 <div class="sv-val" id="iiko-expected" style="color:var(--a2);">—</div>
-              </div>
-              <div class="sv-row">
-                <div class="sv-label">📦 Заказы iiko, принятые в эту смену</div>
-                <div class="sv-val" id="iiko-day-orders" style="color:var(--text);">—</div>
               </div>
             </div>
 
             <!-- Фактический iiko -->
             <div class="fg" style="margin-bottom:12px;">
-              <label class="fl">Фактический iiko (₸) <span style="font-weight:400;color:var(--text3);">— заполняется из отчёта, можно исправить вручную</span></label>
-              <input class="fi" type="number" id="iikoActual" placeholder="Сумма заказов, принятых в эту смену"
+              <label class="fl">Фактический iiko отчёт (₸) <span style="font-weight:400;color:var(--text3);">— из отчёта 0080 подставляется сам, можно исправить</span></label>
+              <input class="fi" type="number" id="iikoActual" placeholder="Введите сумму из iiko"
                 oninput="window._iikoManual=true;renderIiko()" style="width:280px;">
+              <div id="iikoActualSrc" style="font-size:11px;color:var(--text3);margin-top:4px;"></div>
             </div>
 
             <!-- Результат -->
@@ -1064,32 +1069,35 @@ function applyAutoMark() {
 }
 
 // ══════════════════════════════════════════════════
-//  СВЕРКА С IIKO — ПО ДАТЕ ПРИНЯТИЯ ЗАКАЗА
-//  Ожидаемый iiko = ВСЯ касса за смену: каждый заказ,
-//  принятый сегодня, создан в iiko сегодня — независимо
-//  от того, на какой день назначена доставка.
+//  СВЕРКА С IIKO
+//  Формула прежняя, по учётному дню:
+//    Ожидаемый iiko = Итого Kaspi
+//                   + предоплаты, перенесённые из прошлых смен
+//                   − предоплаты на будущие даты
+//  Отчёт 0080 нужен, чтобы (а) подставить фактическую сумму
+//  за учётный день, (б) взять перенос из самих заказов, а не из
+//  localStorage, (в) сопоставить заказы с оплатами ПО ДАТЕ ПРИНЯТИЯ.
 // ══════════════════════════════════════════════════
 function renderIiko() {
   const el = id => document.getElementById(id);
   if (!el('iiko-expected')) return;
 
   const shiftDate = el('rDate').value;
-  const dailyAmt  = txns.filter(t => states[t.id]==='daily').reduce((s,t)=>s+t.amount,0);
-  const preAmt    = txns.filter(t => states[t.id]==='prepay').reduce((s,t)=>s+t.amount,0);
-  const unsetAmt  = txns.filter(t => states[t.id]==='none').reduce((s,t)=>s+t.amount,0);
-  const unsetN    = txns.filter(t => states[t.id]==='none').length;
-  const expected  = txns.reduce((s,t)=>s+t.amount,0);   // = Итого Kaspi
+  const totalKaspi = txns.reduce((s,t)=>s+t.amount,0);
+  const dailyAmt   = txns.filter(t => states[t.id]==='daily').reduce((s,t)=>s+t.amount,0);
+  const unsetAmt   = txns.filter(t => states[t.id]==='none').reduce((s,t)=>s+t.amount,0);
+  const unsetN     = txns.filter(t => states[t.id]==='none').length;
 
-  el('iiko-daily').textContent    = kFmt(dailyAmt);
-  el('iiko-future').textContent   = kFmt(preAmt);
-  el('iiko-expected').textContent = kFmt(expected);
-  el('iiko-unset-row').style.display = unsetN ? '' : 'none';
-  if (unsetN) el('iiko-unset').textContent = `${kFmt(unsetAmt)} (${unsetN} шт)`;
+  const todayPrepays = txns.filter(t => states[t.id]==='prepay' && meta[t.id]?.orderDate === shiftDate);
+  const todayPrepayAmt = todayPrepays.reduce((s,t)=>s+t.amount,0);
+  const futurePrepays = txns.filter(t => states[t.id]==='prepay' && meta[t.id]?.orderDate && meta[t.id].orderDate > shiftDate);
+  const futurePrepayAmt = futurePrepays.reduce((s,t)=>s+t.amount,0);
 
-  // ── Сопоставление с отчётом ──
+  // ── Сопоставление с отчётом (по дате принятия заказа) ──
   matchRes = null;
   const warn = el('iikoWarn'), mb = el('matchBlock');
   warn.style.display = 'none';
+  let iikoUch = null;   // факт за учётный день из отчёта
 
   if (iikoOrders.length && shiftDate) {
     if (iikoPeriod && (shiftDate < iikoPeriod.from || shiftDate > iikoPeriod.to)) {
@@ -1097,14 +1105,35 @@ function renderIiko() {
       warn.innerHTML = `⚠️ Отчёт выгружен за период <b>${ruDate(iikoPeriod.from)}–${ruDate(iikoPeriod.to)}</b>, а смена — <b>${ruDate(shiftDate)}</b>. Заказы этой смены в отчёт не попали: выгрузите 0080 так, чтобы период включал дату смены.`;
     }
     matchRes = matchOrders(txns, iikoOrders, shiftDate);
-    el('iiko-day-orders').textContent = `${kFmt(matchRes.iikoDay)} (${matchRes.dayOrders.length} шт)`;
-    if (!window._iikoManual) el('iikoActual').value = matchRes.iikoDay || '';
+    iikoUch = iikoOrders.filter(o => o.uchDate === shiftDate).reduce((s,o)=>s+o.sum,0);
+    if (!window._iikoManual) el('iikoActual').value = iikoUch || '';
+    el('iikoActualSrc').textContent = `Из отчёта: заказы с учётным днём ${ruDate(shiftDate)} — ${kFmt(iikoUch)}`;
     renderMatchLists(matchRes, shiftDate);
     mb.style.display = '';
   } else {
-    el('iiko-day-orders').textContent = '—';
+    el('iikoActualSrc').textContent = '';
     mb.style.display = 'none';
   }
+
+  // Перенос предоплат из прошлых смен: из отчёта, если он загружен,
+  // иначе — из localStorage / Google Таблицы.
+  const carryAmt   = matchRes ? matchRes.deliveredTodayAmt   : (window._carryoverAmt   || 0);
+  const carryCount = matchRes ? matchRes.deliveredToday.length : (window._carryoverCount || 0);
+
+  const expected = totalKaspi + carryAmt - futurePrepayAmt;
+
+  el('iiko-daily').textContent    = kFmt(dailyAmt);
+  el('iiko-today').textContent    = todayPrepayAmt ? `${kFmt(todayPrepayAmt)} (${todayPrepays.length} шт)` : '0 ₸';
+  el('iiko-future').textContent   = futurePrepayAmt ? `${kFmt(futurePrepayAmt)} (${futurePrepays.length} шт)` : '0 ₸';
+  el('iiko-expected').textContent = kFmt(expected);
+  el('iiko-unset-row').style.display = unsetN ? '' : 'none';
+  if (unsetN) el('iiko-unset').textContent = `${kFmt(unsetAmt)} (${unsetN} шт)`;
+
+  const carryRow = el('iiko-carryover-row');
+  if (carryAmt) {
+    carryRow.style.display = '';
+    el('iiko-carryover').textContent = `${kFmt(carryAmt)} (${carryCount} шт)${matchRes ? ' · из отчёта' : ''}`;
+  } else carryRow.style.display = 'none';
 
   // ── Итог сверки ──
   const badge = el('iikoBadge'), result = el('iikoResult');
@@ -1119,12 +1148,12 @@ function renderIiko() {
   if (diff === 0) {
     badge.style.background='var(--gbg)'; badge.style.color='var(--green)'; badge.textContent='✅ Сходится';
     result.style.color='var(--green)';
-    result.innerHTML = `✅ Заказы, принятые ${ruDate(shiftDate)}, полностью закрыты кассой: <b>${kFmt(actual)}</b>`;
+    result.innerHTML = `✅ iiko сходится: <b>${kFmt(actual)}</b>`;
   } else {
     badge.style.background='var(--rbg)'; badge.style.color='var(--red)'; badge.textContent='❌ Расхождение';
     result.style.color='var(--red)';
-    result.innerHTML = `❌ Расхождение: <b>${kFmt(Math.abs(diff))}</b> ${diff>0?'(в iiko больше, чем в кассе)':'(в кассе больше, чем в iiko)'}<br>
-      <span style="font-size:11px;color:var(--text3);">Касса за смену ${kFmt(expected)}, заказы iiko от ${ruDate(shiftDate)} — ${kFmt(actual)}</span>`;
+    result.innerHTML = `❌ Расхождение: <b>${kFmt(Math.abs(diff))}</b> ${diff>0?'(iiko больше ожидаемого)':'(iiko меньше ожидаемого)'}<br>
+      <span style="font-size:11px;color:var(--text3);">Ожидалось ${kFmt(expected)}, фактически ${kFmt(actual)}</span>`;
   }
 }
 
@@ -1219,11 +1248,12 @@ async function closeShift() {
   const prepay  = txns.filter(t=>states[t.id]==='prepay').reduce((s,t)=>s+t.amount,0);
 
   // iiko data
-  // Сверка по ДАТЕ ПРИНЯТИЯ ЗАКАЗА: всё, что принято в смену, создано в iiko в эту же смену.
-  // Ожидаемый iiko = вся касса смены. Ничего не переносим между днями.
-  const prepayToday      = txns.filter(t=>states[t.id]==='prepay' && meta[t.id]?.orderDate===date).reduce((s,t)=>s+t.amount,0);
+  const prepayTodayLocal = txns.filter(t=>states[t.id]==='prepay' && meta[t.id]?.orderDate===date).reduce((s,t)=>s+t.amount,0);
   const prepayFuture     = txns.filter(t=>states[t.id]==='prepay' && meta[t.id]?.orderDate && meta[t.id].orderDate>date).reduce((s,t)=>s+t.amount,0);
-  const expectedIiko     = total;
+  // Перенос: из отчёта 0080, если он загружен, иначе из localStorage / Google Таблицы
+  const carryAmt         = matchRes ? matchRes.deliveredTodayAmt : (window._carryoverAmt || 0);
+  const prepayToday      = prepayTodayLocal + carryAmt; // предоплаты за сегодня = из текущего PDF + перенос из прошлых смен
+  const expectedIiko     = total + carryAmt - prepayFuture;
   const actualIiko   = parseInt(document.getElementById('iikoActual')?.value || '0', 10) || 0;
 
   try {
