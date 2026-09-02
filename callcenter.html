@@ -619,6 +619,29 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
               <div id="matchLists"></div>
             </div>
           </div>
+
+          <!-- СВЕРКА БЛЮД С ПРИХОДОМ -->
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <div class="card-title">📦 Блюда против прихода</div>
+                <div style="font-size:11px;color:var(--text3);margin-top:2px;">заказы 0080 против приходных накладных на склад доставки</div>
+              </div>
+              <span class="badge" id="prihodBadge" style="background:var(--ybg);color:var(--yellow);">Ожидание</span>
+            </div>
+
+            <div class="upload-zone" id="prihodZone" style="padding:16px;margin-bottom:12px;" onclick="document.getElementById('prihodFile').click()">
+              <div style="font-size:24px;margin-bottom:6px;">🧾</div>
+              <div style="font-size:13px;font-weight:700;">Загрузите приходные накладные</div>
+              <div style="font-size:11px;color:var(--text3);margin-top:3px;">выгрузка «Приходная накладная» из iiko (.xls) — можно все накладные за день одним файлом</div>
+            </div>
+            <input type="file" id="prihodFile" accept=".xls,.xlsx" style="display:none;">
+
+            <div id="prihodResult" style="font-size:13px;color:var(--text3);">
+              Сначала загрузите отчёт 0080 выше, затем накладные
+            </div>
+            <div id="prihodLists" style="margin-top:12px;"></div>
+          </div>
         </div>
       </div>
     </div><!-- /kassaMain -->
@@ -774,7 +797,7 @@ function resetKaspi() {
 }
 
 // ── Render ──
-function renderAll() { renderTxns(); renderSverka(); renderPrepayDetails(); renderIiko(); }
+function renderAll() { renderTxns(); renderSverka(); renderPrepayDetails(); renderIiko(); renderPrihod(); }
 
 function renderTxns() {
   const list = document.getElementById('txnList');
@@ -931,6 +954,7 @@ function parseIikoAoa(aoa) {
   const cOper = C('оператор доставки'), cNum = C('номер доставки'), cCourier = C('курьер');
   const cClient = C('фио клиента'), cPhone = C('телефон клиента');
   const cComment = C('комментарий к доставке'), cAddr = C('адрес'), cDish = C('блюдо');
+  const cCat = C('категория блюда'), cQty = C('количество блюд');
   const cSum = C('сумма со скидкой, тенге') >= 0 ? C('сумма со скидкой, тенге') : C('сумма со скидкой');
   if (cOpen < 0 || cSum < 0) throw new Error('В отчёте нет колонок «Время открытия» / «Сумма со скидкой»');
 
@@ -951,7 +975,7 @@ function parseIikoAoa(aoa) {
           phone: String((cPhone>=0?row[cPhone]:'')||'').trim(),
           comment: String((cComment>=0?row[cComment]:'')||'').trim(),
           addr: String((cAddr>=0?row[cAddr]:'')||'').trim(),
-          sum: 0
+          sum: 0, items: []
         };
         orders.push(cur);
       } else cur = null;
@@ -960,6 +984,12 @@ function parseIikoAoa(aoa) {
     const dish = cDish >= 0 ? String(row[cDish]||'').trim() : '';
     if (!dish) continue;                     // строки-итоги («Блюдо всего», «… всего»)
     cur.sum += numOrZero(row[cSum]);
+    cur.items.push({
+      dish,
+      cat: cCat >= 0 ? String(row[cCat]||'').trim() : '',
+      qty: cQty >= 0 ? numOrZero(row[cQty]) : 0,
+      sum: numOrZero(row[cSum])
+    });
   }
   return orders.filter(o => o.num || o.sum);
 }
@@ -1162,6 +1192,363 @@ function renderIiko() {
     result.innerHTML = `❌ Расхождение: <b>${kFmt(Math.abs(diff))}</b> ${diff>0?'(iiko больше ожидаемого)':'(iiko меньше ожидаемого)'}<br>
       <span style="font-size:11px;color:var(--text3);">Ожидалось ${kFmt(expected)}, фактически ${kFmt(actual)}</span>`;
   }
+}
+
+// ══════════════════════════════════════════════════
+//  ПРИХОДНЫЕ НАКЛАДНЫЕ → СВЕРКА БЛЮД
+//  Заказы из 0080 за учётный день против того, что
+//  реально пришло на склад доставки.
+// ══════════════════════════════════════════════════
+let prihodInvoices = [], prihodFileName = '';
+
+// Состав сетов (из каталога ТӘП-ТӘТТІ). Позиции с «/» и «торт» —
+// подстановочные: закрывают любую подходящую позицию прихода.
+const SET_PARTS = {
+  'сет шанырак': [
+    { name: '"Шығыс самсасы" етпен', qty: 5 },
+    { name: '"Шығыс самсасы" тауық етімен', qty: 5 },
+    { name: 'Бауырсақ', qty: 1 },
+    { name: 'Мини-муравейник пирожное', qty: 6 },
+    { any: /бөрек.*(ет|тауық)/i, label: 'Бөрек ет/тауық', qty: 4 },
+    { any: /бөрек.*(картоп|алма)/i, label: 'Бөрек картоп/алма', qty: 4 },
+    { any: /торт|тарт|рулет/i, label: 'Торт', qty: 1 }
+  ],
+  'сет береке': [
+    { name: '"Шығыс самсасы" тауық етімен', qty: 10 },
+    { name: 'Бөрек картоппен', qty: 10 },
+    { name: 'Бөрек етпен', qty: 10 },
+    { name: 'Бауырсақ', qty: 1 },
+    { any: /кекс/i, label: 'Алмалы кекс', qty: 6 },
+    { any: /куриный пирог|тауық етті бәліш/i, label: 'Куриный пирог', qty: 1 },
+    { any: /бәліш/i, label: 'Бәліш', qty: 1 },
+    { any: /шу/i, label: 'Шу', qty: 6 }
+  ],
+  'сет дастархан': [
+    { name: '"Шығыс самсасы" тауық етімен', qty: 10 },
+    { name: '"Шығыс самсасы" етпен', qty: 10 },
+    { any: /бөрек.*алма/i, label: 'Бөрек алма', qty: 5 },
+    { name: 'Бөрек етпен', qty: 10 },
+    { name: 'Бөрек тауық етімен', qty: 10 },
+    { name: 'Бауырсақ', qty: 2 },
+    { any: /кекс/i, label: 'Алмалы кекс', qty: 6 },
+    { any: /бәліш/i, label: 'Бәліш', qty: 1 },
+    { any: /торт|тарт|рулет/i, label: 'Торт', qty: 1 },
+    { any: /эклер/i, label: 'Эклер', qty: 6 }
+  ]
+};
+
+// Услуги и строки, которые товаром не являются
+const NOT_GOODS = /достав|сводная цена|услуг|упаковк|пакет/i;
+
+// Нормализация названия: операторы дописывают позиции руками, с дефисом,
+// в другом падеже и с опечатками — сводим к общему виду.
+// Скобки НЕ выбрасываем: «(кіші)» отличает малый торт от обычного.
+const nName = s => String(s || '')
+  .replace(/^[\s\-–—]+/, '')
+  .replace(/["«»']/g, ' ')
+  .replace(/ё/gi, 'е')
+  .replace(/[^\p{L}\p{N}]+/gu, ' ')
+  .replace(/\s+/g, ' ').trim().toLowerCase();
+
+const nTokens = s => nName(s).split(' ').filter(t => t.length > 2);
+
+// Операторы печатают без казахской раскладки: «тауық» → «тауык», «етімен» → «етымен».
+// Для сравнения складываем казахские буквы к русским аналогам.
+const FOLD = { 'қ':'к','ғ':'г','ң':'н','ө':'о','ұ':'у','ү':'у','і':'и','ы':'и','һ':'х','ә':'а' };
+const fold = s => String(s).replace(/[қғңөұүіыһә]/g, c => FOLD[c] || c);
+
+// Слова размера: важны только если у позиции есть «брат» без размера
+const SIZE_WORDS = new Set(['кіші','киши','үлкен','улкен','мини','mini','большой','маленький','малый','кусок']);
+const sizeSet = s => new Set(nTokens(s).filter(t => SIZE_WORDS.has(t)));
+const baseKey = s => nTokens(s).filter(t => !SIZE_WORDS.has(t)).join(' ');
+
+function lev(a, b) {
+  const m = a.length, n = b.length;
+  if (Math.abs(m - n) > 2) return 9;
+  const d = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)]);
+  for (let j = 0; j <= n; j++) d[0][j] = j;
+  for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++)
+    d[i][j] = Math.min(d[i-1][j] + 1, d[i][j-1] + 1, d[i-1][j-1] + (a[i-1] === b[j-1] ? 0 : 1));
+  return d[m][n];
+}
+function tokMatch(a0, b0) {
+  const a = fold(a0), b = fold(b0);
+  if (a === b) return true;
+  const mn = Math.min(a.length, b.length);
+  if (mn >= 4 && (a.startsWith(b) || b.startsWith(a))) return true;
+  if (a.length >= 7 && b.length >= 7 && lev(a, b) <= 2) return true;   // опечатки: каротоппен/картоппен
+  return false;
+}
+
+// Сопоставление названий. Слова взвешены по редкости в приходе: редкое
+// («муравейник») связывает позиции, частое («бөрек») — само по себе нет.
+function makeScorer(recvNames) {
+  const df = new Map();
+  recvNames.forEach(n => new Set(nTokens(n)).forEach(t => df.set(t, (df.get(t) || 0) + 1)));
+  const w = t => 1 / (df.get(t) || 1);
+  const bases = new Map();
+  recvNames.forEach(n => {
+    const b = baseKey(n);
+    bases.set(b, (bases.get(b) || new Set()).add([...sizeSet(n)].join(',')));
+  });
+  const sizeMatters = n => (bases.get(baseKey(n)) || new Set()).size > 1;
+
+  const one = (a, b) => {
+    if (nName(a) === nName(b)) return 1;
+    if (sizeMatters(b)) {          // есть и обычный, и «кіші» — размер обязан совпасть
+      const sa = [...sizeSet(a)].sort().join(','), sb = [...sizeSet(b)].sort().join(',');
+      if (sa !== sb) return 0;
+    }
+    const A = [...new Set(nTokens(a))], B = [...new Set(nTokens(b))];
+    if (!A.length || !B.length) return 0;
+    let matched = 0, strong = false, lost = false;
+    const used = new Set();
+    for (const t of A) {
+      const j = B.findIndex((u, i) => !used.has(i) && tokMatch(t, u));
+      if (j < 0) { if (w(t) >= 0.5) lost = true; continue; }  // редкое слово заказа не нашлось
+      used.add(j);
+      const wt = Math.max(w(t), w(B[j]));
+      matched += wt;
+      if (wt >= 0.5) strong = true;
+    }
+    if (!strong || lost) return 0;
+    const tot = x => x.reduce((s, t) => s + w(t), 0);
+    return matched / Math.max(tot(A), tot(B));
+  };
+  // «Медовый/Балды торт» — оператор пишет два названия через слэш
+  return (a, b) => {
+    let best = one(a, b);
+    if (String(a).includes('/')) for (const part of String(a).split('/'))
+      best = Math.max(best, one(part.trim(), b));
+    return best;
+  };
+}
+
+// ── Разбор файла накладных (в одном файле их обычно много) ──
+function parsePrihodAoa(aoa) {
+  const inv = []; let cur = null, inTable = false;
+  const txt = r => (r || []).map(v => v == null ? '' : String(v)).join(' ').trim();
+  const num = v => { const n = parseFloat(String(v == null ? '' : v).replace(/[\s ]/g, '').replace(',', '.')); return isNaN(n) ? 0 : n; };
+  for (const row of aoa) {
+    const line = txt(row);
+    const m = line.match(/Накладная\s*№\s*(\S+)\s*от\s*([^]{0,40}?)(?:\s{2,}|$)/i);
+    if (m) { cur = { num: m[1], dateRaw: m[2].trim(), date: ruDateToISO(m[2]), supplier: '', store: '', items: [] }; inv.push(cur); inTable = false; continue; }
+    if (!cur) continue;
+    if (/Поставщик:/.test(line)) {
+      cur.supplier = String(row[4] || '').trim();
+      cur.store = String(row[13] || '').trim();
+      continue;
+    }
+    if (String(row[0] || '').trim() === '№' && /Товар/i.test(line)) { inTable = true; continue; }
+    if (/^Итого/i.test(String(row[0] || '').trim())) { inTable = false; continue; }
+    if (inTable && /^\d+$/.test(String(row[0] || '').trim())) {
+      cur.items.push({
+        code: String(row[2] || '').trim(),
+        name: String(row[4] || '').trim(),
+        qty:  num(row[7]),
+        sum:  num(row[18])
+      });
+    }
+  }
+  return inv.filter(i => i.items.length);
+}
+
+const RU_MONTHS = ['январ','феврал','март','апрел','ма','июн','июл','август','сентябр','октябр','ноябр','декабр'];
+function ruDateToISO(s) {
+  const m = String(s).match(/(\d{1,2})\s+([а-яё]+)\s*(\d{4})?/i);
+  if (!m) return '';
+  const mi = RU_MONTHS.findIndex(x => m[2].toLowerCase().startsWith(x));
+  if (mi < 0) return '';
+  const y = m[3] || String(new Date().getFullYear());
+  return `${y}-${String(mi + 1).padStart(2, '0')}-${String(m[1]).padStart(2, '0')}`;
+}
+
+// ── Сверка блюд за учётный день ──
+function matchDishes(orders, invoices, day) {
+  // что пришло
+  const recv = new Map();
+  const dayInv = invoices.filter(i => i.date === day);
+  dayInv.forEach(i => i.items.forEach(it => {
+    const k = nName(it.name);
+    const e = recv.get(k) || { name: it.name, qty: 0 };
+    e.qty += it.qty; recv.set(k, e);
+  }));
+
+  // что заказано (по учётному дню), сеты раскладываем на составляющие
+  const score = makeScorer([...recv.values()].map(v => v.name));
+  const ord = new Map(), wild = [], setsUsed = [];
+  const addOrd = (name, qty, from) => {
+    let k = nName(name);
+    if (!recv.has(k)) {                      // подтягиваем к названию из прихода
+      let best = null, bs = 0;
+      for (const [rk, rv] of recv) { const sc = score(name, rv.name); if (sc > bs) { bs = sc; best = rk; } }
+      if (bs >= 0.45) k = best;
+    }
+    const e = ord.get(k) || { name: recv.get(k)?.name || name, qty: 0, from: [] };
+    e.qty += qty; if (from) e.from.push(from);
+    ord.set(k, e);
+  };
+
+  orders.filter(o => o.uchDate === day).forEach(o => (o.items || []).forEach(it => {
+    if (NOT_GOODS.test(it.dish) || it.cat === 'Доптовары') return;
+    const parts = SET_PARTS[nName(it.dish)];
+    if (parts) {
+      setsUsed.push({ set: it.dish, qty: it.qty || 1, num: o.num });
+      parts.forEach(p => wild.push({
+        re: p.any, name: p.name, label: p.label || p.name,
+        qty: p.qty * (it.qty || 1), set: it.dish
+      }));
+      return;
+    }
+    addOrd(it.dish, it.qty, null);
+  }));
+
+  // Состав сета закрывает НЕДОСТАЧУ против прихода, а не добавляется сверху:
+  // операторы часто выписывают позиции сета ещё и отдельными строками заказа,
+  // и прямое сложение задваивало бы количества.
+  const wildUsed = [];
+  for (const w of wild) {
+    let left = w.qty;
+    const all = [...recv.entries()]
+      .filter(([k, r]) => w.re ? w.re.test(r.name) : (nName(w.name) === k || score(w.name, r.name) >= 0.45));
+    const cands = all
+      .map(([k, r]) => [k, r, r.qty - (ord.get(k)?.qty || 0)])
+      .filter(x => x[2] > 0)
+      .sort((a, b) => b[2] - a[2]);
+    for (const [k, r, gap] of cands) {
+      if (left <= 0) break;
+      const take = Math.min(gap, left);
+      addOrd(r.name, take, `из «${w.set}»`);
+      left -= take;
+      wildUsed.push({ label: w.label, name: r.name, qty: take, set: w.set });
+    }
+    if (left > 0) wildUsed.push({ label: w.label, name: null, qty: left, set: w.set, covered: all.length > 0 });
+  }
+
+  const keys = [...new Set([...ord.keys(), ...recv.keys()])];
+  const okList = [], missing = [], extra = [], diff = [];
+  for (const k of keys) {
+    const o = ord.get(k)?.qty || 0, p = recv.get(k)?.qty || 0;
+    const name = recv.get(k)?.name || ord.get(k).name;
+    const from = ord.get(k)?.from || [];
+    if (Math.abs(o - p) < 0.001) okList.push({ name, qty: o, from });
+    else if (o === 0) extra.push({ name, o, p });
+    else if (p === 0) missing.push({ name, o, p });
+    else diff.push({ name, o, p, from });
+  }
+  const byName = (a, b) => a.name.localeCompare(b.name, 'ru');
+  return {
+    day, invoices: dayInv, setsUsed, wildUsed,
+    ok: okList.sort(byName), missing: missing.sort(byName),
+    extra: extra.sort(byName), diff: diff.sort(byName),
+    suppliers: [...new Set(dayInv.map(i => i.supplier).filter(Boolean))]
+  };
+}
+
+// ── Загрузка файла накладных ──
+function initPrihodUpload() {
+  const inp = document.getElementById('prihodFile');
+  if (!inp) return;
+  inp.addEventListener('change', async function (e) {
+    const f = e.target.files[0]; if (!f) return;
+    const z = document.getElementById('prihodZone');
+    z.innerHTML = '<div style="font-size:22px;">⏳</div><div style="font-size:12px;">Читаем накладные…</div>';
+    try {
+      const wb = XLSX.read(await f.arrayBuffer(), { type: 'array' });
+      const aoa = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: null, blankrows: true });
+      prihodInvoices = parsePrihodAoa(aoa);
+      prihodFileName = f.name;
+      if (!prihodInvoices.length) throw new Error('Не найдено ни одной накладной — это выгрузка «Приходная накладная»?');
+      const dates = [...new Set(prihodInvoices.map(i => i.date).filter(Boolean))].sort();
+      z.className = 'upload-zone done';
+      z.innerHTML = `<div style="font-size:22px;">✅</div><div style="font-size:13px;font-weight:600;">${f.name}</div>
+        <div style="font-size:11px;color:var(--green);margin-top:3px;">Накладных: ${prihodInvoices.length} · позиций: ${prihodInvoices.reduce((s,i)=>s+i.items.length,0)}${dates.length ? ' · даты ' + dates.map(ruDate).join(', ') : ''}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:4px;">нажмите, чтобы загрузить другой</div>`;
+      renderPrihod();
+    } catch (err) {
+      prihodInvoices = [];
+      z.className = 'upload-zone';
+      z.innerHTML = `<div style="font-size:22px;">❌</div><div style="font-size:13px;font-weight:600;">Не удалось прочитать накладные</div><div style="font-size:11px;color:var(--red);margin-top:4px;">${err.message}</div>`;
+    }
+  });
+}
+
+function renderPrihod() {
+  const el = id => document.getElementById(id);
+  if (!el('prihodResult')) return;
+  const badge = el('prihodBadge'), res = el('prihodResult'), lists = el('prihodLists');
+  const day = el('rDate').value;
+
+  if (!prihodInvoices.length) { lists.innerHTML = ''; return; }
+  if (!iikoOrders.length) {
+    badge.style.background='var(--ybg)'; badge.style.color='var(--yellow)'; badge.textContent='Нет 0080';
+    res.style.color='var(--yellow)';
+    res.innerHTML = 'Накладные загружены. Теперь загрузите отчёт 0080 выше — без него не с чем сверять.';
+    lists.innerHTML = ''; return;
+  }
+
+  const r = matchDishes(iikoOrders, prihodInvoices, day);
+  window._prihodRes = r;
+
+  if (!r.invoices.length) {
+    badge.style.background='var(--ybg)'; badge.style.color='var(--yellow)'; badge.textContent='Нет накладных за день';
+    res.style.color='var(--yellow)';
+    const dates = [...new Set(prihodInvoices.map(i => i.date))].sort().map(ruDate).join(', ');
+    res.innerHTML = `В файле нет накладных за ${ruDate(day)} — есть за ${dates}. Проверьте дату смены или выгрузите накладные за нужный день.`;
+    lists.innerHTML = ''; return;
+  }
+
+  const problems = r.missing.length + r.extra.length + r.diff.length;
+  if (!problems) {
+    badge.style.background='var(--gbg)'; badge.style.color='var(--green)'; badge.textContent='✅ Сходится';
+    res.style.color='var(--green)';
+    res.innerHTML = `✅ Все ${r.ok.length} позиций сошлись с приходом · накладных ${r.invoices.length}, точек ${r.suppliers.length}`;
+  } else {
+    badge.style.background='var(--rbg)'; badge.style.color='var(--red)'; badge.textContent=`${problems} расхождений`;
+    res.style.color='var(--text2)';
+    res.innerHTML = `Сошлось ${r.ok.length} позиций, расхождений ${problems} · накладных ${r.invoices.length}, точек ${r.suppliers.length}`;
+  }
+  renderPrihodLists(r);
+}
+
+function renderPrihodLists(r) {
+  const box = (color, title, count, inner) => `
+    <div style="background:var(--bg3);border-radius:8px;border-left:3px solid ${color};padding:10px 12px;margin-bottom:8px;">
+      <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;font-weight:700;margin-bottom:${inner?'8px':'0'};">
+        <span>${title}</span><span style="color:var(--text3);font-weight:500;">${count}</span>
+      </div>${inner||''}</div>`;
+  const row = (name, note, right, color) => `
+    <div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:3px 0;border-top:1px solid var(--border);">
+      <span style="flex:1;">${name}${note ? ` <span style="color:var(--text3);">· ${note}</span>` : ''}</span>
+      <span style="font-family:var(--mono);white-space:nowrap;${color?'color:'+color:''}">${right}</span></div>`;
+
+  let html = '';
+
+  if (r.missing.length)
+    html += box('var(--red)', '❗ Заказано, но не пришло', `${r.missing.length} поз.`,
+      r.missing.map(x => row(x.name, '', `заказ ${x.o} / приход 0`, 'var(--red)')).join(''));
+
+  if (r.diff.length)
+    html += box('var(--yellow)', '≠ Не сходится количество', `${r.diff.length} поз.`,
+      r.diff.map(x => row(x.name, x.from.join(', '), `заказ ${x.o} / приход ${x.p}`, 'var(--yellow)')).join(''));
+
+  if (r.extra.length)
+    html += box('var(--a2)', '⚠️ Пришло, но в заказах нет', `${r.extra.length} поз.`,
+      r.extra.map(x => row(x.name, '', `приход ${x.p}`, 'var(--a2)')).join(''));
+
+  if (r.setsUsed.length)
+    html += box('var(--text3)', '🎁 Сеты разложены на составляющие', `${r.setsUsed.length} шт`,
+      r.setsUsed.map(s => row(s.set, 'заказ №' + s.num, '×' + s.qty, 'var(--text3)')).join('') +
+      r.wildUsed.filter(w => w.name).map(w => row(w.label + ' → ' + w.name, 'закрыто приходом', '+' + w.qty, 'var(--text3)')).join('') +
+      r.wildUsed.filter(w => !w.name).map(w => row(w.label,
+        w.covered ? 'уже выписано строками заказа' : 'из «' + w.set + '» — в приходе не нашлось',
+        w.covered ? '—' : 'нет ' + w.qty, w.covered ? 'var(--text3)' : 'var(--yellow)')).join(''));
+
+  if (r.ok.length)
+    html += box('var(--green)', '✅ Сошлось', `${r.ok.length} поз.`,
+      r.ok.map(x => row(x.name, x.from.join(', '), x.qty, 'var(--green)')).join(''));
+
+  document.getElementById('prihodLists').innerHTML = html;
 }
 
 function renderMatchLists(r, shiftDate) {
@@ -1562,6 +1949,7 @@ function updateOpSelect() {
 document.addEventListener('DOMContentLoaded', () => {
   initClock();
   initIikoUpload();
+  initPrihodUpload();
   const url = ls('scriptUrl');
   if(url && url !== 'undefined'){ document.getElementById('scriptUrl').value=url; updateConnBadge(true); }
   else if(url === 'undefined'){ localStorage.removeItem('scriptUrl'); }
