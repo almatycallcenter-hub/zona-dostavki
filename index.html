@@ -3,226 +3,283 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#14100e">
+<meta name="theme-color" content="#f2f1ef">
 <meta name="description" content="Рабочий стол колл-центра ТӘП-ТӘТТІ: сверка кассы, калькулятор доставки, зоны, продукция.">
 <title>ТӘП-ТӘТТІ · Колл-центр</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🥧</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,600&family=Manrope:wght@400;500;700&family=JetBrains+Mono:wght@400;700&display=swap&subset=cyrillic,cyrillic-ext,latin" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,600;1,500;1,600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 /* ─────────────────────────────────────────────
-   ТӘП-ТӘТТІ · ночная пекарня
-   Тёплая тёмная тема: жжёный сахар, охра, крем.
-   Заголовки — антиква, цифры — моноширинный.
+   ТӘП-ТӘТТІ · светлый рабочий стол
+   Бумажный фон, белые карточки с мягкой тенью,
+   перламутровый градиент как единственный акцент.
    ───────────────────────────────────────────── */
 :root{
-  --ink:#14100e;          /* печной чугун */
-  --ink2:#1d1714;
-  --ink3:#272019;
-  --line:#3a2f26;
-  --cream:#f3e7d6;        /* крем */
-  --cream2:#c8b8a4;
-  --cream3:#8a7c6d;
-  --ochre:#e0a33e;        /* карамель */
-  --berry:#c4553d;        /* жжёный сахар */
-  --leaf:#7f9a6a;         /* фисташка */
-  --serif:'Cormorant Garamond',Georgia,'Times New Roman',serif;
-  --sans:'Manrope',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,monospace;
+  --paper:#f1f0ee;
+  --card:#fff;
+  --ink:#17140f;
+  --ink2:#5f5952;
+  --ink3:#98918a;
+  --hair:#e8e5e1;
+  --hair2:#f0eeeb;
+  --ok:#16a34a;   --okbg:#e7f6ec;
+  --warn:#c2410c; --warnbg:#fdeee4;
+  --sans:'Onest',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --serif:'Playfair Display',Georgia,serif;
+  --mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,monospace;
+  /* перламутр: персик → розовый → сирень → небо */
+  --iris:linear-gradient(115deg,#ffd8a8 0%,#ffb7c5 28%,#c9b8ff 58%,#a8d8ff 82%,#bff3e4 100%);
+  --sh-s:0 1px 2px rgba(23,20,15,.05), 0 4px 10px -4px rgba(23,20,15,.06);
+  --sh-m:0 2px 4px rgba(23,20,15,.04), 0 16px 34px -18px rgba(23,20,15,.18);
+  --sh-l:0 3px 6px rgba(23,20,15,.05), 0 30px 60px -28px rgba(23,20,15,.26);
+  --r:22px;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html{-webkit-text-size-adjust:100%}
 body{
-  background:var(--ink);color:var(--cream);min-height:100dvh;position:relative;
-  font:400 15px/1.6 var(--sans);
-  padding:max(26px,env(safe-area-inset-top)) 20px calc(40px + env(safe-area-inset-bottom));
-  /* два тёплых источника света — как противень из печи */
+  background:var(--paper);color:var(--ink);min-height:100dvh;
+  font:400 15px/1.55 var(--sans);letter-spacing:-.01em;
+  padding:max(16px,env(safe-area-inset-top)) 16px calc(30px + env(safe-area-inset-bottom));
+  /* еле заметный перламутр по краям листа */
   background-image:
-    radial-gradient(720px 380px at 12% -8%,rgba(224,163,62,.13),transparent 68%),
-    radial-gradient(560px 320px at 92% 4%,rgba(196,85,61,.10),transparent 66%);
+    radial-gradient(900px 420px at 4% 0%,rgba(255,183,197,.18),transparent 62%),
+    radial-gradient(760px 380px at 98% 6%,rgba(168,216,255,.20),transparent 60%);
 }
-/* зерно поверх всего — уводит от плоской заливки */
-body::after{
-  content:'';position:fixed;inset:0;pointer-events:none;z-index:99;opacity:.32;
-  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.5'/%3E%3C/svg%3E");
+.wrap{max-width:1120px;margin:0 auto}
+
+@keyframes rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+.rise{animation:rise .6s cubic-bezier(.22,.7,.3,1) both}
+
+/* ── Верхняя панель ── */
+.bar{
+  display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  background:var(--card);border-radius:18px;padding:10px 12px 10px 10px;
+  box-shadow:var(--sh-s);margin-bottom:16px
 }
-.wrap{max-width:940px;margin:0 auto;position:relative;z-index:1}
-
-/* ── появление с задержкой ── */
-@keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
-.rise{animation:rise .7s cubic-bezier(.2,.7,.3,1) both}
-
-/* ── Шапка ── */
-header{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;flex-wrap:wrap}
-.mark{font-family:var(--serif);font-weight:700;font-size:clamp(34px,9vw,52px);line-height:.95;letter-spacing:-.5px}
-.mark em{font-style:italic;color:var(--ochre)}
-.tag{font-size:12.5px;color:var(--cream3);letter-spacing:.16em;text-transform:uppercase;margin-top:9px}
-.now{font-family:var(--mono);text-align:right;line-height:1.2}
-.now b{display:block;font-size:clamp(24px,7vw,32px);font-weight:700;color:var(--cream)}
-.now span{font-size:11.5px;color:var(--cream3);letter-spacing:.1em}
-
-/* орнаментальная линейка вместо обычного hr */
-.rule{
-  height:9px;margin:22px 0 30px;opacity:.5;
-  background:
-    repeating-linear-gradient(90deg,var(--ochre) 0 1px,transparent 1px 9px) 0 0/100% 1px no-repeat,
-    repeating-linear-gradient(135deg,transparent 0 5px,var(--line) 5px 6px) 0 4px/100% 5px no-repeat;
+.logo{
+  width:38px;height:38px;border-radius:12px;flex:none;background:var(--iris);
+  display:grid;place-items:center;font-size:19px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.55)
 }
+.name{font-weight:700;font-size:15px;letter-spacing:-.02em;padding-right:4px}
+.nav{display:flex;gap:4px;flex-wrap:wrap;margin-left:2px}
+.nav a{
+  text-decoration:none;color:var(--ink2);font-size:13.5px;font-weight:500;
+  padding:8px 13px;border-radius:11px;transition:background .2s,color .2s;white-space:nowrap
+}
+.nav a:hover{background:var(--hair2);color:var(--ink)}
+.bar .right{margin-left:auto;display:flex;align-items:center;gap:10px}
+.stamp{font-family:var(--mono);font-size:13px;font-weight:500;color:var(--ink2);white-space:nowrap}
+.stamp b{color:var(--ink);font-weight:600}
+.chip-live{
+  display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;
+  background:var(--okbg);color:var(--ok);padding:6px 11px;border-radius:999px;white-space:nowrap
+}
+.chip-live.warn{background:var(--warnbg);color:var(--warn)}
+.dot{width:6px;height:6px;border-radius:50%;background:currentColor}
 
-/* ── Смена ── */
+/* ── Сетка ── */
+.cols{display:grid;gap:16px;grid-template-columns:1fr;align-items:start}
+@media (min-width:900px){.cols{grid-template-columns:1.62fr 1fr}}
+
+/* ── Карточка смены ── */
 .shift{
-  display:block;text-decoration:none;color:inherit;position:relative;overflow:hidden;
-  background:linear-gradient(160deg,var(--ink3),var(--ink2) 58%);
-  border:1px solid var(--line);border-radius:4px;padding:clamp(20px,4.5vw,34px);
-  transition:border-color .35s,box-shadow .35s
+  display:flex;flex-direction:column;text-decoration:none;color:inherit;
+  background:var(--card);border-radius:var(--r);padding:clamp(20px,3.4vw,30px);
+  box-shadow:var(--sh-m);position:relative;overflow:hidden;
+  transition:transform .3s cubic-bezier(.22,.7,.3,1),box-shadow .3s
 }
-.shift:hover{border-color:var(--ochre);box-shadow:0 18px 44px -28px rgba(224,163,62,.6)}
-/* огромная цифра-водяной знак — уходит в пустоту справа сверху, а не под текст */
-.shift::before{
-  content:'20:30';position:absolute;right:-8px;top:-16px;
-  font-family:var(--serif);font-weight:700;font-size:clamp(110px,13vw,180px);
-  line-height:.8;color:var(--ochre);opacity:.06;pointer-events:none;letter-spacing:-5px
+.shift:hover{transform:translateY(-3px);box-shadow:var(--sh-l)}
+.shift::before{  /* перламутровое пятно в углу */
+  content:'';position:absolute;right:-70px;top:-90px;width:280px;height:280px;
+  background:var(--iris);border-radius:50%;filter:blur(46px);opacity:.42;pointer-events:none
 }
-@media (max-width:720px){ .shift::before{display:none} }
-.kicker{font-size:11.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--berry);font-weight:700}
-.shift h2{
-  font-family:var(--serif);font-weight:600;font-size:clamp(30px,7.5vw,46px);
-  line-height:1.02;margin:8px 0 6px;letter-spacing:-.4px
+.eyebrow{position:relative;font-size:11.5px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--ink3)}
+.shift h1{
+  position:relative;font-size:clamp(28px,5.4vw,42px);font-weight:600;line-height:1.06;
+  letter-spacing:-.035em;margin:10px 0 8px
 }
-.shift h2 i{font-style:italic;color:var(--ochre)}
-.shift .lede{color:var(--cream2);font-size:14.5px;max-width:44ch}
+.shift h1 em{font-family:var(--serif);font-style:italic;font-weight:500}
+.lede{position:relative;color:var(--ink2);font-size:14.5px;max-width:46ch}
 
-.steps{list-style:none;margin-top:26px;display:grid;gap:1px;background:var(--line);border:1px solid var(--line);border-radius:3px;overflow:hidden}
-@media (min-width:640px){.steps{grid-template-columns:repeat(4,1fr)}}
-.steps li{background:var(--ink2);padding:13px 15px}
-.steps i{
-  font-style:normal;font-family:var(--mono);font-size:11px;font-weight:700;
-  color:var(--ochre);display:block;margin-bottom:5px;letter-spacing:.08em
+.stepper{position:relative;display:grid;gap:10px;margin:24px 0 22px}
+@media (min-width:620px){.stepper{grid-template-columns:repeat(4,1fr)}}
+.st{display:flex;gap:10px;align-items:flex-start}
+.st .n{
+  width:24px;height:24px;flex:none;border-radius:50%;background:var(--hair2);
+  font-family:var(--mono);font-size:11px;font-weight:600;color:var(--ink2);
+  display:grid;place-items:center;margin-top:1px
 }
-.steps b{display:block;font-size:14px;font-weight:700;letter-spacing:-.1px}
-.steps span{display:block;font-size:12px;color:var(--cream3);margin-top:2px;line-height:1.4}
+.st b{display:block;font-size:13.5px;font-weight:600;letter-spacing:-.02em}
+.st span{display:block;font-size:12px;color:var(--ink3);line-height:1.4;margin-top:1px}
 
-/* ── Инструменты: не плитки, а редакционный список ── */
-.tools{margin-top:38px;border-top:1px solid var(--line)}
-.tool{
-  display:grid;grid-template-columns:auto 1fr auto;align-items:baseline;gap:16px;
-  padding:20px 4px;border-bottom:1px solid var(--line);
-  text-decoration:none;color:inherit;position:relative;
-  transition:padding-left .3s,background .3s
+.cta{
+  position:relative;align-self:flex-start;margin-top:4px;
+  display:inline-flex;align-items:center;gap:9px;
+  background:var(--ink);color:#fff;font-size:14px;font-weight:600;
+  padding:13px 22px;border-radius:999px;transition:gap .25s,opacity .25s
 }
-.tool::before{
-  content:'';position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--ochre);
-  transform:scaleY(0);transform-origin:top;transition:transform .3s
-}
-.tool:hover{padding-left:16px;background:linear-gradient(90deg,rgba(224,163,62,.06),transparent 60%)}
-.tool:hover::before{transform:scaleY(1)}
-.num{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--cream3);letter-spacing:.05em}
-.tool:hover .num{color:var(--ochre)}
-.tool h3{font-family:var(--serif);font-size:clamp(21px,5vw,27px);font-weight:600;line-height:1.15;letter-spacing:-.2px}
-.tool p{font-size:13px;color:var(--cream3);margin-top:3px;max-width:52ch}
-.arrow{font-size:19px;color:var(--cream3);transition:transform .3s,color .3s;line-height:1}
-.tool:hover .arrow{transform:translateX(6px);color:var(--ochre)}
+.shift:hover .cta{gap:14px}
 
-/* ── Низ ── */
-.strip{display:flex;flex-wrap:wrap;gap:9px;margin-top:30px}
-.chip{
-  display:inline-flex;align-items:center;gap:8px;text-decoration:none;font-size:12.5px;
-  color:var(--cream2);border:1px solid var(--line);border-radius:999px;padding:9px 16px;
-  transition:border-color .25s,color .25s,background .25s
+/* ── Правая колонка ── */
+.side{display:flex;flex-direction:column;gap:16px}
+.orb-card{
+  background:var(--card);border-radius:var(--r);padding:26px 22px;box-shadow:var(--sh-m);
+  text-align:center;display:flex;flex-direction:column;align-items:center
 }
-.chip:hover{border-color:var(--ochre);color:var(--cream);background:rgba(224,163,62,.06)}
-footer{margin-top:26px;font-size:11.5px;color:var(--cream3);letter-spacing:.04em}
+.orb{
+  width:104px;height:104px;border-radius:50%;background:var(--iris);
+  box-shadow:0 14px 34px -12px rgba(201,184,255,.85), inset 0 0 26px rgba(255,255,255,.6);
+  animation:float 7s ease-in-out infinite
+}
+@keyframes float{0%,100%{transform:translateY(0) rotate(0)}50%{transform:translateY(-7px) rotate(8deg)}}
+.orb-card h2{
+  font-size:20px;font-weight:600;letter-spacing:-.03em;margin:18px 0 4px;line-height:1.2
+}
+.orb-card h2 em{font-family:var(--serif);font-style:italic;font-weight:500}
+.orb-card p{font-size:13.5px;color:var(--ink2);max-width:30ch}
+.side-links{display:flex;flex-direction:column;gap:8px;width:100%;margin-top:18px}
+.side-links a{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  text-decoration:none;color:var(--ink);font-size:13.5px;font-weight:500;
+  background:var(--hair2);border-radius:13px;padding:12px 15px;
+  transition:background .2s,transform .2s
+}
+.side-links a:hover{background:var(--hair);transform:translateX(3px)}
+.side-links span{color:var(--ink3);font-size:15px}
 
-a:focus-visible{outline:2px solid var(--ochre);outline-offset:4px}
-@media (max-width:560px){
-  .tool{grid-template-columns:auto 1fr;padding:17px 2px}
-  .arrow{display:none}
-  .now{text-align:left}
-  header{align-items:flex-start}
+/* ── Плитки инструментов ── */
+.grid{display:grid;gap:14px;margin-top:16px;grid-template-columns:repeat(auto-fit,minmax(228px,1fr))}
+.tile{
+  display:flex;flex-direction:column;gap:9px;text-decoration:none;color:inherit;
+  background:var(--card);border-radius:18px;padding:20px;box-shadow:var(--sh-s);
+  transition:transform .3s cubic-bezier(.22,.7,.3,1),box-shadow .3s
 }
-@media (prefers-reduced-motion:reduce){
-  *{animation:none!important;transition:none!important}
+.tile:hover{transform:translateY(-3px);box-shadow:var(--sh-m)}
+.ico{
+  width:40px;height:40px;border-radius:13px;display:grid;place-items:center;font-size:19px;
+  box-shadow:inset 0 0 0 1px rgba(23,20,15,.05)
 }
+.tile h3{font-size:15px;font-weight:600;letter-spacing:-.025em;margin-top:2px}
+.tile p{font-size:12.5px;color:var(--ink3);line-height:1.45}
+.tile .go{
+  margin-top:auto;padding-top:6px;font-size:12.5px;font-weight:600;color:var(--ink2);
+  display:inline-flex;gap:6px;transition:gap .25s,color .25s
+}
+.tile:hover .go{gap:11px;color:var(--ink)}
+
+footer{margin-top:22px;text-align:center;font-size:12px;color:var(--ink3)}
+
+a:focus-visible{outline:2px solid var(--ink);outline-offset:3px;border-radius:12px}
+@media (max-width:640px){
+  .bar{padding:10px}
+  .nav{order:3;width:100%;border-top:1px solid var(--hair2);padding-top:8px;margin-top:2px}
+  .nav a{padding:8px 11px;font-size:13px}
+  .bar .right{margin-left:auto}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
 <body>
 <div class="wrap">
 
-  <header class="rise">
-    <div>
-      <div class="mark">ТӘП<em>·</em>ТӘТТІ</div>
-      <div class="tag">Колл-центр · Алматы</div>
+  <div class="bar rise">
+    <div class="logo" aria-hidden="true">🥧</div>
+    <div class="name">ТӘП-ТӘТТІ</div>
+    <nav class="nav">
+      <a href="callcenter.html">Касса</a>
+      <a href="delivery_calculator.html">Калькулятор</a>
+      <a href="tap_tatti_app.html#catalog">Продукция</a>
+      <a href="tap_tatti_zones.html">Зоны</a>
+    </nav>
+    <div class="right">
+      <span class="stamp"><b id="clock">—</b> <span id="today"></span></span>
+      <span class="chip-live" id="live"><i class="dot"></i><span id="liveTxt">Смена идёт</span></span>
     </div>
-    <div class="now">
-      <b id="clock">—</b>
-      <span id="today"></span>
-    </div>
-  </header>
-
-  <div class="rule rise" style="animation-delay:.06s" aria-hidden="true"></div>
-
-  <a class="shift rise" href="callcenter.html" style="animation-delay:.12s">
-    <div class="kicker" id="kicker">Смена закрывается к 20:30</div>
-    <h2>Сверка <i>кассы</i></h2>
-    <p class="lede">Kaspi Pay против iiko и приходных накладных. Разметка предоплат, сопоставление заказов и оплат, сверка блюд с приходом.</p>
-    <ol class="steps">
-      <li><i>ШАГ 1</i><b>Отчёт Kaspi</b><span>PDF за смену</span></li>
-      <li><i>ШАГ 2</i><b>Отчёт 0080</b><span>период включает дату смены</span></li>
-      <li><i>ШАГ 3</i><b>Накладные</b><span>приход на склад доставки</span></li>
-      <li><i>ШАГ 4</i><b>Закрыть смену</b><span>запись в «Касса КЦ»</span></li>
-    </ol>
-  </a>
-
-  <nav class="tools">
-    <a class="tool rise" href="delivery_calculator.html" style="animation-delay:.2s">
-      <span class="num">01</span>
-      <span><h3>Калькулятор доставки</h3><p>Стоимость по адресу от девяти точек, карта 2ГИС.</p></span>
-      <span class="arrow" aria-hidden="true">→</span>
-    </a>
-    <a class="tool rise" href="tap_tatti_app.html#catalog" style="animation-delay:.26s">
-      <span class="num">02</span>
-      <span><h3>Продукция</h3><p>Больше 150 позиций: состав, вес, сроки хранения.</p></span>
-      <span class="arrow" aria-hidden="true">→</span>
-    </a>
-    <a class="tool rise" href="tap_tatti_zones.html" style="animation-delay:.32s">
-      <span class="num">03</span>
-      <span><h3>Зоны и филиалы</h3><p>Тарифы по зонам и порог бесплатной доставки.</p></span>
-      <span class="arrow" aria-hidden="true">→</span>
-    </a>
-    <a class="tool rise" href="tap_tatti_4mkr_tarif.html" style="animation-delay:.38s">
-      <span class="num">04</span>
-      <span><h3>Тарифы Wolt</h3><p>Сары Арка — зоны доставки и тариф курьера.</p></span>
-      <span class="arrow" aria-hidden="true">→</span>
-    </a>
-  </nav>
-
-  <div class="strip rise" style="animation-delay:.44s">
-    <a class="chip" href="https://docs.google.com/spreadsheets/d/1pq1yEgrBQY__Kp9gB_gq7cD-UNdDrfDIrIqh8JTVYn4/edit" target="_blank" rel="noopener">Таблица «Касса КЦ» — смены и транзакции</a>
-    <a class="chip" href="callcenter.html">Настройки подключения</a>
   </div>
 
-  <footer class="rise" style="animation-delay:.5s">Внутренний инструмент колл-центра ТӘП-ТӘТТІ</footer>
+  <div class="cols">
+
+    <a class="shift rise" href="callcenter.html" style="animation-delay:.06s">
+      <div class="eyebrow">Ежедневно · к 20:30</div>
+      <h1>Сверка <em>кассы</em></h1>
+      <p class="lede">Kaspi Pay против iiko и приходных накладных: разметка предоплат, сопоставление заказов с оплатами и блюд с приходом.</p>
+
+      <div class="stepper">
+        <div class="st"><i class="n">1</i><div><b>Отчёт Kaspi</b><span>PDF за смену</span></div></div>
+        <div class="st"><i class="n">2</i><div><b>Отчёт 0080</b><span>период с датой смены</span></div></div>
+        <div class="st"><i class="n">3</i><div><b>Накладные</b><span>приход на склад</span></div></div>
+        <div class="st"><i class="n">4</i><div><b>Закрыть смену</b><span>запись в «Касса КЦ»</span></div></div>
+      </div>
+
+      <span class="cta">Открыть сверку <span aria-hidden="true">→</span></span>
+    </a>
+
+    <div class="side">
+      <div class="orb-card rise" style="animation-delay:.12s">
+        <div class="orb" aria-hidden="true"></div>
+        <h2 id="greet">Добрый вечер,<br><em>с чего начнём?</em></h2>
+        <p>Всё для смены — в одном месте: касса, доставка, продукция.</p>
+        <div class="side-links">
+          <a href="https://docs.google.com/spreadsheets/d/1pq1yEgrBQY__Kp9gB_gq7cD-UNdDrfDIrIqh8JTVYn4/edit" target="_blank" rel="noopener">Таблица «Касса КЦ» <span aria-hidden="true">↗</span></a>
+          <a href="callcenter.html">Настройки подключения <span aria-hidden="true">→</span></a>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="grid">
+    <a class="tile rise" href="delivery_calculator.html" style="animation-delay:.18s">
+      <div class="ico" style="background:#e8f1ff" aria-hidden="true">🗺️</div>
+      <h3>Калькулятор доставки</h3>
+      <p>Стоимость по адресу от девяти точек, карта 2ГИС.</p>
+      <span class="go">Открыть <span aria-hidden="true">→</span></span>
+    </a>
+    <a class="tile rise" href="tap_tatti_app.html#catalog" style="animation-delay:.23s">
+      <div class="ico" style="background:#fff1e0" aria-hidden="true">🧾</div>
+      <h3>Продукция</h3>
+      <p>Больше 150 позиций: состав, вес, сроки хранения.</p>
+      <span class="go">Открыть <span aria-hidden="true">→</span></span>
+    </a>
+    <a class="tile rise" href="tap_tatti_zones.html" style="animation-delay:.28s">
+      <div class="ico" style="background:#e9f7ee" aria-hidden="true">📍</div>
+      <h3>Зоны и филиалы</h3>
+      <p>Тарифы по зонам и порог бесплатной доставки.</p>
+      <span class="go">Открыть <span aria-hidden="true">→</span></span>
+    </a>
+    <a class="tile rise" href="tap_tatti_4mkr_tarif.html" style="animation-delay:.33s">
+      <div class="ico" style="background:#f3ecff" aria-hidden="true">🛵</div>
+      <h3>Тарифы Wolt</h3>
+      <p>Сары Арка — зоны доставки и тариф курьера.</p>
+      <span class="go">Открыть <span aria-hidden="true">→</span></span>
+    </a>
+  </div>
+
+  <footer class="rise" style="animation-delay:.38s">Внутренний инструмент колл-центра ТӘП-ТӘТТІ · Алматы</footer>
 </div>
 
 <script>
 (function () {
   var p = function (n) { return String(n).padStart(2, '0'); };
-  var clock  = document.getElementById('clock'),
-      today  = document.getElementById('today'),
-      kicker = document.getElementById('kicker');
+  var clock = document.getElementById('clock'),
+      today = document.getElementById('today'),
+      greet = document.getElementById('greet'),
+      live  = document.getElementById('live'),
+      liveT = document.getElementById('liveTxt');
 
-  today.textContent = new Date()
-    .toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'long' })
-    .toUpperCase();
+  today.textContent = new Date().toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
 
   function tick() {
     var n = new Date(), h = n.getHours(), m = n.getMinutes();
     clock.textContent = p(h) + ':' + p(m);
-    // после 20:00 подсказка становится напоминанием
-    kicker.textContent = (h >= 20 || (h === 19 && m >= 45))
-      ? 'Пора закрывать смену'
-      : 'Смена закрывается к 20:30';
+    greet.innerHTML = (h < 12 ? 'Доброе утро,' : h < 17 ? 'Добрый день,' : 'Добрый вечер,')
+      + '<br><em>с чего начнём?</em>';
+    // после 19:45 плашка напоминает, что пора закрываться
+    var late = h >= 20 || (h === 19 && m >= 45);
+    live.className = 'chip-live' + (late ? ' warn' : '');
+    liveT.textContent = late ? 'Пора закрывать смену' : 'Смена идёт';
   }
   tick();
   setInterval(tick, 20000);
