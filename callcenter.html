@@ -600,7 +600,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
             <div class="fg" style="margin-bottom:12px;">
               <label class="fl">Фактический iiko отчёт (₸) <span style="font-weight:400;color:var(--text3);">— из отчёта 0080 подставляется сам, можно исправить</span></label>
               <input class="fi" type="number" id="iikoActual" placeholder="Введите сумму из iiko"
-                oninput="window._iikoManual=true;renderIiko()" style="width:280px;">
+                oninput="window._iikoManual=(this.value!=='');renderIiko()" style="width:280px;">
               <div id="iikoActualSrc" style="font-size:11px;color:var(--text3);margin-top:4px;"></div>
             </div>
 
@@ -1057,15 +1057,16 @@ function applyAutoMark() {
     meta[p.txn.id].note = '№' + p.order.num + (p.order.comment ? ' · ' + p.order.comment : '');
     isPre ? nPre++ : nDay++;
   }
-  // Оплаты без заказа этой даты (самовывоз, возвраты, ручные суммы) — дневные,
-  // чтобы смена закрывалась; они остаются в списке ❗ для проверки.
-  let nRest = 0;
-  for (const t of matchRes.kaspiOnly) {
-    if (states[t.id] === 'none') { states[t.id] = 'daily'; nRest++; }
-  }
+  // Оплаты без заказа в отчёте НЕ трогаем: среди них может быть предоплата,
+  // заказ на которую ещё не создан. Оператор размечает их сам.
+  const nRest = matchRes.kaspiOnly.filter(t => states[t.id] === 'none').length;
   renderAll();
   const st = document.getElementById('saveStatus');
-  if (st) { st.style.color = 'var(--green)'; st.textContent = `✨ Размечено: ${nDay} дневных, ${nPre} предоплат${nRest ? `, ${nRest} без заказа → дневные` : ''}`; }
+  if (st) {
+    st.style.color = nRest ? 'var(--yellow)' : 'var(--green)';
+    st.textContent = `✨ Размечено: ${nDay} дневных, ${nPre} предоплат`
+      + (nRest ? ` · ${nRest} оплат без заказа — разметьте вручную` : '');
+  }
 }
 
 // ══════════════════════════════════════════════════
@@ -1107,7 +1108,10 @@ function renderIiko() {
     matchRes = matchOrders(txns, iikoOrders, shiftDate);
     iikoUch = iikoOrders.filter(o => o.uchDate === shiftDate).reduce((s,o)=>s+o.sum,0);
     if (!window._iikoManual) el('iikoActual').value = iikoUch || '';
-    el('iikoActualSrc').textContent = `Из отчёта: заказы с учётным днём ${ruDate(shiftDate)} — ${kFmt(iikoUch)}`;
+    const nUch = iikoOrders.filter(o => o.uchDate === shiftDate).length;
+    el('iikoActualSrc').innerHTML = nUch
+      ? `Итог отчёта за учётный день ${ruDate(shiftDate)}: <b>${kFmt(iikoUch)}</b> · ${nUch} заказов · принято в эту смену ${matchRes.dayOrders.length} на ${kFmt(matchRes.iikoDay)}`
+      : `<span style="color:var(--yellow)">В отчёте нет заказов с учётным днём ${ruDate(shiftDate)} — проверьте дату смены и период выгрузки</span>`;
     renderMatchLists(matchRes, shiftDate);
     mb.style.display = '';
   } else {
@@ -1172,7 +1176,9 @@ function renderMatchLists(r, shiftDate) {
   html += box('var(--green)', '✅ Заказ ↔ оплата', `${r.pairs.length} шт · ${kFmt(r.pairs.reduce((s,p)=>s+p.order.sum,0))}`,
     r.pairs.map(p => row(
       `${p.txn.time.slice(0,5)} → №${p.order.num}`,
-      `${p.order.client||'—'}${p.order.uchDate > p.order.openDate ? ' · <span style="color:var(--a2)">предоплата на '+ruDate(p.order.uchDate)+'</span>' : ''}${p.gap > 5400 ? ' · <span style="color:var(--yellow)">разрыв '+Math.round(p.gap/60)+' мин</span>' : ''}`,
+      `${p.order.client||'—'} · ${p.order.uchDate > p.order.openDate
+          ? '<span style="color:var(--a2)">предоплата, уч. день '+ruDate(p.order.uchDate)+'</span>'
+          : '<span style="color:var(--text3)">уч. день '+ruDate(p.order.uchDate)+'</span>'}${p.gap > 5400 ? ' · <span style="color:var(--yellow)">разрыв '+Math.round(p.gap/60)+' мин</span>' : ''}`,
       { txt: kFmt(p.order.sum) })).join(''));
 
   if (r.iikoOnly.length)
