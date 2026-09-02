@@ -2006,9 +2006,17 @@ function updateOpSelect() {
 // ══════════════════════════════════════════════════
 //  INIT
 // ══════════════════════════════════════════════════
+// Открываем раздел, указанный в адресе: callcenter.html#kaspi
+function goFromHash() {
+  const id = (location.hash || '').replace('#', '');
+  if (id && document.getElementById('page-' + id)) go(id);
+}
+window.addEventListener('hashchange', goFromHash);
+
 document.addEventListener('DOMContentLoaded', () => {
   initClock();
   initIikoUpload();
+  goFromHash();
   initPrihodUpload();
   const url = ls('scriptUrl');
   if(url && url !== 'undefined'){ document.getElementById('scriptUrl').value=url; updateConnBadge(true); }
