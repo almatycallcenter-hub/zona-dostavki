@@ -2,10 +2,231 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="refresh" content="0; url=callcenter.html">
-<title>ТӘП-ТӘТТІ</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14100e">
+<meta name="description" content="Рабочий стол колл-центра ТӘП-ТӘТТІ: сверка кассы, калькулятор доставки, зоны, продукция.">
+<title>ТӘП-ТӘТТІ · Колл-центр</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🥧</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,600&family=Manrope:wght@400;500;700&family=JetBrains+Mono:wght@400;700&display=swap&subset=cyrillic,cyrillic-ext,latin" rel="stylesheet">
+<style>
+/* ─────────────────────────────────────────────
+   ТӘП-ТӘТТІ · ночная пекарня
+   Тёплая тёмная тема: жжёный сахар, охра, крем.
+   Заголовки — антиква, цифры — моноширинный.
+   ───────────────────────────────────────────── */
+:root{
+  --ink:#14100e;          /* печной чугун */
+  --ink2:#1d1714;
+  --ink3:#272019;
+  --line:#3a2f26;
+  --cream:#f3e7d6;        /* крем */
+  --cream2:#c8b8a4;
+  --cream3:#8a7c6d;
+  --ochre:#e0a33e;        /* карамель */
+  --berry:#c4553d;        /* жжёный сахар */
+  --leaf:#7f9a6a;         /* фисташка */
+  --serif:'Cormorant Garamond',Georgia,'Times New Roman',serif;
+  --sans:'Manrope',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{
+  background:var(--ink);color:var(--cream);min-height:100dvh;position:relative;
+  font:400 15px/1.6 var(--sans);
+  padding:max(26px,env(safe-area-inset-top)) 20px calc(40px + env(safe-area-inset-bottom));
+  /* два тёплых источника света — как противень из печи */
+  background-image:
+    radial-gradient(720px 380px at 12% -8%,rgba(224,163,62,.13),transparent 68%),
+    radial-gradient(560px 320px at 92% 4%,rgba(196,85,61,.10),transparent 66%);
+}
+/* зерно поверх всего — уводит от плоской заливки */
+body::after{
+  content:'';position:fixed;inset:0;pointer-events:none;z-index:99;opacity:.32;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.5'/%3E%3C/svg%3E");
+}
+.wrap{max-width:940px;margin:0 auto;position:relative;z-index:1}
+
+/* ── появление с задержкой ── */
+@keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+.rise{animation:rise .7s cubic-bezier(.2,.7,.3,1) both}
+
+/* ── Шапка ── */
+header{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;flex-wrap:wrap}
+.mark{font-family:var(--serif);font-weight:700;font-size:clamp(34px,9vw,52px);line-height:.95;letter-spacing:-.5px}
+.mark em{font-style:italic;color:var(--ochre)}
+.tag{font-size:12.5px;color:var(--cream3);letter-spacing:.16em;text-transform:uppercase;margin-top:9px}
+.now{font-family:var(--mono);text-align:right;line-height:1.2}
+.now b{display:block;font-size:clamp(24px,7vw,32px);font-weight:700;color:var(--cream)}
+.now span{font-size:11.5px;color:var(--cream3);letter-spacing:.1em}
+
+/* орнаментальная линейка вместо обычного hr */
+.rule{
+  height:9px;margin:22px 0 30px;opacity:.5;
+  background:
+    repeating-linear-gradient(90deg,var(--ochre) 0 1px,transparent 1px 9px) 0 0/100% 1px no-repeat,
+    repeating-linear-gradient(135deg,transparent 0 5px,var(--line) 5px 6px) 0 4px/100% 5px no-repeat;
+}
+
+/* ── Смена ── */
+.shift{
+  display:block;text-decoration:none;color:inherit;position:relative;overflow:hidden;
+  background:linear-gradient(160deg,var(--ink3),var(--ink2) 58%);
+  border:1px solid var(--line);border-radius:4px;padding:clamp(20px,4.5vw,34px);
+  transition:border-color .35s,box-shadow .35s
+}
+.shift:hover{border-color:var(--ochre);box-shadow:0 18px 44px -28px rgba(224,163,62,.6)}
+/* огромная цифра-водяной знак — уходит в пустоту справа сверху, а не под текст */
+.shift::before{
+  content:'20:30';position:absolute;right:-8px;top:-16px;
+  font-family:var(--serif);font-weight:700;font-size:clamp(110px,13vw,180px);
+  line-height:.8;color:var(--ochre);opacity:.06;pointer-events:none;letter-spacing:-5px
+}
+@media (max-width:720px){ .shift::before{display:none} }
+.kicker{font-size:11.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--berry);font-weight:700}
+.shift h2{
+  font-family:var(--serif);font-weight:600;font-size:clamp(30px,7.5vw,46px);
+  line-height:1.02;margin:8px 0 6px;letter-spacing:-.4px
+}
+.shift h2 i{font-style:italic;color:var(--ochre)}
+.shift .lede{color:var(--cream2);font-size:14.5px;max-width:44ch}
+
+.steps{list-style:none;margin-top:26px;display:grid;gap:1px;background:var(--line);border:1px solid var(--line);border-radius:3px;overflow:hidden}
+@media (min-width:640px){.steps{grid-template-columns:repeat(4,1fr)}}
+.steps li{background:var(--ink2);padding:13px 15px}
+.steps i{
+  font-style:normal;font-family:var(--mono);font-size:11px;font-weight:700;
+  color:var(--ochre);display:block;margin-bottom:5px;letter-spacing:.08em
+}
+.steps b{display:block;font-size:14px;font-weight:700;letter-spacing:-.1px}
+.steps span{display:block;font-size:12px;color:var(--cream3);margin-top:2px;line-height:1.4}
+
+/* ── Инструменты: не плитки, а редакционный список ── */
+.tools{margin-top:38px;border-top:1px solid var(--line)}
+.tool{
+  display:grid;grid-template-columns:auto 1fr auto;align-items:baseline;gap:16px;
+  padding:20px 4px;border-bottom:1px solid var(--line);
+  text-decoration:none;color:inherit;position:relative;
+  transition:padding-left .3s,background .3s
+}
+.tool::before{
+  content:'';position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--ochre);
+  transform:scaleY(0);transform-origin:top;transition:transform .3s
+}
+.tool:hover{padding-left:16px;background:linear-gradient(90deg,rgba(224,163,62,.06),transparent 60%)}
+.tool:hover::before{transform:scaleY(1)}
+.num{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--cream3);letter-spacing:.05em}
+.tool:hover .num{color:var(--ochre)}
+.tool h3{font-family:var(--serif);font-size:clamp(21px,5vw,27px);font-weight:600;line-height:1.15;letter-spacing:-.2px}
+.tool p{font-size:13px;color:var(--cream3);margin-top:3px;max-width:52ch}
+.arrow{font-size:19px;color:var(--cream3);transition:transform .3s,color .3s;line-height:1}
+.tool:hover .arrow{transform:translateX(6px);color:var(--ochre)}
+
+/* ── Низ ── */
+.strip{display:flex;flex-wrap:wrap;gap:9px;margin-top:30px}
+.chip{
+  display:inline-flex;align-items:center;gap:8px;text-decoration:none;font-size:12.5px;
+  color:var(--cream2);border:1px solid var(--line);border-radius:999px;padding:9px 16px;
+  transition:border-color .25s,color .25s,background .25s
+}
+.chip:hover{border-color:var(--ochre);color:var(--cream);background:rgba(224,163,62,.06)}
+footer{margin-top:26px;font-size:11.5px;color:var(--cream3);letter-spacing:.04em}
+
+a:focus-visible{outline:2px solid var(--ochre);outline-offset:4px}
+@media (max-width:560px){
+  .tool{grid-template-columns:auto 1fr;padding:17px 2px}
+  .arrow{display:none}
+  .now{text-align:left}
+  header{align-items:flex-start}
+}
+@media (prefers-reduced-motion:reduce){
+  *{animation:none!important;transition:none!important}
+}
+</style>
 </head>
 <body>
-<p>Открываем приложение… Если перенаправление не сработало, <a href="callcenter.html">нажмите здесь</a>.</p>
+<div class="wrap">
+
+  <header class="rise">
+    <div>
+      <div class="mark">ТӘП<em>·</em>ТӘТТІ</div>
+      <div class="tag">Колл-центр · Алматы</div>
+    </div>
+    <div class="now">
+      <b id="clock">—</b>
+      <span id="today"></span>
+    </div>
+  </header>
+
+  <div class="rule rise" style="animation-delay:.06s" aria-hidden="true"></div>
+
+  <a class="shift rise" href="callcenter.html" style="animation-delay:.12s">
+    <div class="kicker" id="kicker">Смена закрывается к 20:30</div>
+    <h2>Сверка <i>кассы</i></h2>
+    <p class="lede">Kaspi Pay против iiko и приходных накладных. Разметка предоплат, сопоставление заказов и оплат, сверка блюд с приходом.</p>
+    <ol class="steps">
+      <li><i>ШАГ 1</i><b>Отчёт Kaspi</b><span>PDF за смену</span></li>
+      <li><i>ШАГ 2</i><b>Отчёт 0080</b><span>период включает дату смены</span></li>
+      <li><i>ШАГ 3</i><b>Накладные</b><span>приход на склад доставки</span></li>
+      <li><i>ШАГ 4</i><b>Закрыть смену</b><span>запись в «Касса КЦ»</span></li>
+    </ol>
+  </a>
+
+  <nav class="tools">
+    <a class="tool rise" href="delivery_calculator.html" style="animation-delay:.2s">
+      <span class="num">01</span>
+      <span><h3>Калькулятор доставки</h3><p>Стоимость по адресу от девяти точек, карта 2ГИС.</p></span>
+      <span class="arrow" aria-hidden="true">→</span>
+    </a>
+    <a class="tool rise" href="tap_tatti_app.html#catalog" style="animation-delay:.26s">
+      <span class="num">02</span>
+      <span><h3>Продукция</h3><p>Больше 150 позиций: состав, вес, сроки хранения.</p></span>
+      <span class="arrow" aria-hidden="true">→</span>
+    </a>
+    <a class="tool rise" href="tap_tatti_zones.html" style="animation-delay:.32s">
+      <span class="num">03</span>
+      <span><h3>Зоны и филиалы</h3><p>Тарифы по зонам и порог бесплатной доставки.</p></span>
+      <span class="arrow" aria-hidden="true">→</span>
+    </a>
+    <a class="tool rise" href="tap_tatti_4mkr_tarif.html" style="animation-delay:.38s">
+      <span class="num">04</span>
+      <span><h3>Тарифы Wolt</h3><p>Сары Арка — зоны доставки и тариф курьера.</p></span>
+      <span class="arrow" aria-hidden="true">→</span>
+    </a>
+  </nav>
+
+  <div class="strip rise" style="animation-delay:.44s">
+    <a class="chip" href="https://docs.google.com/spreadsheets/d/1pq1yEgrBQY__Kp9gB_gq7cD-UNdDrfDIrIqh8JTVYn4/edit" target="_blank" rel="noopener">Таблица «Касса КЦ» — смены и транзакции</a>
+    <a class="chip" href="callcenter.html">Настройки подключения</a>
+  </div>
+
+  <footer class="rise" style="animation-delay:.5s">Внутренний инструмент колл-центра ТӘП-ТӘТТІ</footer>
+</div>
+
+<script>
+(function () {
+  var p = function (n) { return String(n).padStart(2, '0'); };
+  var clock  = document.getElementById('clock'),
+      today  = document.getElementById('today'),
+      kicker = document.getElementById('kicker');
+
+  today.textContent = new Date()
+    .toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'long' })
+    .toUpperCase();
+
+  function tick() {
+    var n = new Date(), h = n.getHours(), m = n.getMinutes();
+    clock.textContent = p(h) + ':' + p(m);
+    // после 20:00 подсказка становится напоминанием
+    kicker.textContent = (h >= 20 || (h === 19 && m >= 45))
+      ? 'Пора закрывать смену'
+      : 'Смена закрывается к 20:30';
+  }
+  tick();
+  setInterval(tick, 20000);
+})();
+</script>
 </body>
 </html>
