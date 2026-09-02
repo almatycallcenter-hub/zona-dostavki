@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>ТӘП-ТӘТТІ · Колл-центр</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
@@ -414,7 +415,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
       <div class="module-card" onclick="go('kaspi')">
         <div class="mc-icon">💳</div>
         <div class="mc-title">Касса</div>
-        <div class="mc-sub">Сверка Kaspi Pay по сменам. Разметка предоплат и дневных заказов.</div>
+        <div class="mc-sub">Сверка Kaspi Pay по сменам. Сопоставление с iiko по дате принятия заказа.</div>
         <span class="mc-badge mc-active">Открыть</span>
       </div>
       <div class="module-card" onclick="openApp('calc')">
@@ -443,7 +444,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 <!-- КАССА ───────────────────────────── -->
 <div class="page" id="page-kaspi">
   <div class="page-header">
-    <div><div class="page-title">💳 Сверка кассы</div><div class="page-sub">Kaspi Pay · разметка транзакций</div></div>
+    <div><div class="page-title">💳 Сверка кассы</div><div class="page-sub">Kaspi Pay · сверка с iiko по дате принятия заказа</div></div>
     <button class="btn btn-o btn-sm" onclick="resetKaspi()">↺ Новая смена</button>
   </div>
   <div class="page-body">
@@ -547,45 +548,70 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
           <!-- IIKO СВЕРКА -->
           <div class="card">
             <div class="card-head">
-              <div class="card-title">🟡 Сверка с iiko</div>
+              <div>
+                <div class="card-title">🟡 Сверка с iiko</div>
+                <div style="font-size:11px;color:var(--text3);margin-top:2px;">по дате принятия заказа</div>
+              </div>
               <span class="badge" id="iikoBadge" style="background:var(--ybg);color:var(--yellow);">Ожидание</span>
             </div>
 
-            <!-- Формула (всё авто) -->
+            <!-- Загрузка отчёта 0080 -->
+            <div id="iikoUpBlock" style="margin-bottom:12px;">
+              <div class="upload-zone" id="iikoZone" style="padding:16px;" onclick="document.getElementById('iikoFile').click()">
+                <div style="font-size:24px;margin-bottom:6px;">📥</div>
+                <div style="font-size:13px;font-weight:700;">Загрузите отчёт iiko 0080</div>
+                <div style="font-size:11px;color:var(--text3);margin-top:3px;">«Отчёт по доставкам» в .xlsx — сопоставим заказы с кассой</div>
+              </div>
+              <input type="file" id="iikoFile" accept=".xlsx,.xls" style="display:none;">
+            </div>
+
+            <div id="iikoWarn" style="display:none;font-size:12px;background:var(--ybg);color:var(--yellow);border-radius:8px;padding:10px 12px;margin-bottom:12px;"></div>
+
+            <!-- Формула -->
             <div class="sv-box" style="margin-bottom:12px;">
               <div class="sv-row">
-                <div class="sv-label">🟢 Дневные заказы</div>
+                <div class="sv-label">🟢 Дневные заказы (доставка сегодня)</div>
                 <div class="sv-val" id="iiko-daily" style="color:var(--green);">0 ₸</div>
               </div>
               <div class="sv-row">
-                <div class="sv-label">🔵 Предоплаты за сегодня</div>
-                <div class="sv-val" id="iiko-today" style="color:var(--a2);">0 ₸</div>
+                <div class="sv-label">🔵 Предоплаты (доставка позже)</div>
+                <div class="sv-val" id="iiko-future" style="color:var(--a2);">0 ₸</div>
               </div>
-              <div class="sv-row" id="iiko-carryover-row" style="display:none;">
-                <div class="sv-label">🔄 Перенос из прошлых смен</div>
-                <div class="sv-val" id="iiko-carryover" style="color:var(--a2);">0 ₸</div>
-              </div>
-              <div class="sv-row">
-                <div class="sv-label" style="color:var(--text3);">🔵 Предоплаты за будущую дату</div>
-                <div class="sv-val" id="iiko-future" style="color:var(--text3);">0 ₸</div>
+              <div class="sv-row" id="iiko-unset-row" style="display:none;">
+                <div class="sv-label" style="color:var(--text3);">⚪ Не размечено</div>
+                <div class="sv-val" id="iiko-unset" style="color:var(--text3);">0 ₸</div>
               </div>
               <div class="divider"></div>
               <div class="sv-row sv-total">
-                <div class="sv-label">📊 Ожидаемый iiko</div>
+                <div class="sv-label">📊 Ожидаемый iiko <span style="font-weight:400;color:var(--text3);font-size:11px;">(вся касса смены)</span></div>
                 <div class="sv-val" id="iiko-expected" style="color:var(--a2);">—</div>
+              </div>
+              <div class="sv-row">
+                <div class="sv-label">📦 Заказы iiko, принятые в эту смену</div>
+                <div class="sv-val" id="iiko-day-orders" style="color:var(--text);">—</div>
               </div>
             </div>
 
             <!-- Фактический iiko -->
             <div class="fg" style="margin-bottom:12px;">
-              <label class="fl">Фактический iiko отчёт (₸)</label>
-              <input class="fi" type="number" id="iikoActual" placeholder="Введите сумму из iiko" min="0"
-                oninput="renderIiko()" style="width:220px;">
+              <label class="fl">Фактический iiko (₸) <span style="font-weight:400;color:var(--text3);">— заполняется из отчёта, можно исправить вручную</span></label>
+              <input class="fi" type="number" id="iikoActual" placeholder="Сумма заказов, принятых в эту смену"
+                oninput="window._iikoManual=true;renderIiko()" style="width:280px;">
             </div>
 
             <!-- Результат -->
             <div id="iikoResult" style="font-size:13px;color:var(--text3);">
-              Введите фактическую сумму из iiko для сравнения
+              Загрузите отчёт 0080 или введите сумму вручную
+            </div>
+
+            <!-- Сопоставление -->
+            <div id="matchBlock" style="display:none;margin-top:14px;">
+              <div class="divider" style="margin-bottom:12px;"></div>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+                <div style="font-size:13px;font-weight:700;">🔗 Сопоставление заказов и оплат</div>
+                <button class="btn btn-p btn-sm" onclick="applyAutoMark()">✨ Разметить автоматически</button>
+              </div>
+              <div id="matchLists"></div>
             </div>
           </div>
         </div>
@@ -849,70 +875,294 @@ function renderSverka() {
   }
 }
 
+// ══════════════════════════════════════════════════
+//  IIKO 0080 — ПАРСЕР ОТЧЁТА ПО ДОСТАВКАМ
+// ══════════════════════════════════════════════════
+let iikoOrders = [], iikoPeriod = null, iikoFileName = '', matchRes = null;
+
+function iikoCellToDT(v) {
+  if (v == null || v === '') return null;
+  const p = x => String(x).padStart(2, '0');
+  if (v instanceof Date) {
+    return `${v.getFullYear()}-${p(v.getMonth()+1)}-${p(v.getDate())} ${p(v.getHours())}:${p(v.getMinutes())}:${p(v.getSeconds())}`;
+  }
+  if (typeof v === 'number') {
+    const d = new Date(Math.round((v - 25569) * 86400 * 1000));
+    return `${d.getUTCFullYear()}-${p(d.getUTCMonth()+1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
+  }
+  const s = String(v).trim();
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]} ${m[4]||'00'}:${m[5]||'00'}:${m[6]||'00'}`;
+  m = s.match(/^(\d{2})\.(\d{2})\.(\d{4})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+  if (m) return `${m[3]}-${m[2]}-${m[1]} ${m[4]||'00'}:${m[5]||'00'}:${m[6]||'00'}`;
+  return null;
+}
+const dtDate = dt => (dt ? dt.slice(0,10) : '');
+const dtTime = dt => (dt ? dt.slice(11) : '');
+const ruDate = d => (d ? d.slice(8,10)+'.'+d.slice(5,7) : '');
+function numOrZero(v) {
+  if (v == null || v === '') return 0;
+  if (typeof v === 'number') return v;
+  const n = parseFloat(String(v).replace(/\s/g,'').replace(',','.'));
+  return isNaN(n) ? 0 : n;
+}
+
+function parseIikoAoa(aoa) {
+  let hRow = -1, col = {};
+  for (let r = 0; r < Math.min(aoa.length, 40); r++) {
+    const row = aoa[r] || [];
+    if (row.some(v => String(v||'').trim().toLowerCase() === 'время открытия')) {
+      hRow = r;
+      row.forEach((v,c) => { const k = String(v||'').trim().toLowerCase(); if (k) col[k] = c; });
+      break;
+    }
+  }
+  if (hRow < 0) throw new Error('Не найден заголовок «Время открытия» — похоже, это не отчёт 0080');
+  const C = n => (n in col ? col[n] : -1);
+  const cOpen = C('время открытия');
+  const cUch  = C('учетный день') >= 0 ? C('учетный день') : C('учётный день');
+  const cOper = C('оператор доставки'), cNum = C('номер доставки'), cCourier = C('курьер');
+  const cClient = C('фио клиента'), cPhone = C('телефон клиента');
+  const cComment = C('комментарий к доставке'), cAddr = C('адрес'), cDish = C('блюдо');
+  const cSum = C('сумма со скидкой, тенге') >= 0 ? C('сумма со скидкой, тенге') : C('сумма со скидкой');
+  if (cOpen < 0 || cSum < 0) throw new Error('В отчёте нет колонок «Время открытия» / «Сумма со скидкой»');
+
+  const orders = []; let cur = null;
+  for (let r = hRow + 1; r < aoa.length; r++) {
+    const row = aoa[r] || [];
+    const openStr = String(row[cOpen] == null ? '' : row[cOpen]).trim();
+    if (openStr && !/^итого/i.test(openStr)) {
+      const dt = iikoCellToDT(row[cOpen]);
+      if (dt) {
+        cur = {
+          openDT: dt, openDate: dtDate(dt), openTime: dtTime(dt),
+          uchDate: dtDate(iikoCellToDT(cUch >= 0 ? row[cUch] : null)) || dtDate(dt),
+          oper: String((cOper>=0?row[cOper]:'')||'').split('/')[0].trim(),
+          num: String((cNum>=0?row[cNum]:'')||'').trim(),
+          courier: String((cCourier>=0?row[cCourier]:'')||'').trim(),
+          client: String((cClient>=0?row[cClient]:'')||'').trim(),
+          phone: String((cPhone>=0?row[cPhone]:'')||'').trim(),
+          comment: String((cComment>=0?row[cComment]:'')||'').trim(),
+          addr: String((cAddr>=0?row[cAddr]:'')||'').trim(),
+          sum: 0
+        };
+        orders.push(cur);
+      } else cur = null;
+    }
+    if (!cur) continue;
+    const dish = cDish >= 0 ? String(row[cDish]||'').trim() : '';
+    if (!dish) continue;                     // строки-итоги («Блюдо всего», «… всего»)
+    cur.sum += numOrZero(row[cSum]);
+  }
+  return orders.filter(o => o.num || o.sum);
+}
+
+function parseIikoPeriod(aoa) {
+  for (let r = 0; r < Math.min(aoa.length, 10); r++) {
+    for (const v of (aoa[r] || [])) {
+      const m = String(v||'').match(/с\s+(\d{2})\.(\d{2})\.(\d{4})\s+по\s+(\d{2})\.(\d{2})\.(\d{4})/i);
+      if (m) return { from: `${m[3]}-${m[2]}-${m[1]}`, to: `${m[6]}-${m[5]}-${m[4]}` };
+    }
+  }
+  return null;
+}
+
+// ── Сопоставление по ДАТЕ ПРИНЯТИЯ ЗАКАЗА ──────────
+const secOf = t => { const p = String(t||'0:0:0').split(':').map(Number); return (p[0]||0)*3600 + (p[1]||0)*60 + (p[2]||0); };
+
+function matchOrders(txnList, orders, shiftDate) {
+  const dayOrders   = orders.filter(o => o.openDate === shiftDate);
+  const otherOrders = orders.filter(o => o.openDate !== shiftDate);
+  const usedTxn = new Set();
+  const pairs = [], iikoOnly = [];
+
+  const tryMatch = o => {
+    let best = null, bestGap = Infinity;
+    for (const t of txnList) {
+      if (usedTxn.has(t.id)) continue;
+      if (Math.round(t.amount) !== Math.round(o.sum)) continue;
+      const gap = Math.abs(secOf(t.time) - secOf(o.openTime));
+      if (gap < bestGap) { best = t; bestGap = gap; }
+    }
+    return best ? { txn: best, gap: bestGap } : null;
+  };
+
+  for (const o of dayOrders.slice().sort((a,b) => secOf(a.openTime) - secOf(b.openTime))) {
+    const m = tryMatch(o);
+    if (m) { usedTxn.add(m.txn.id); pairs.push({ order:o, txn:m.txn, gap:m.gap }); }
+    else iikoOnly.push(o);
+  }
+  // доплата за заказ, принятый в один из прошлых дней
+  const foreign = [];
+  for (const o of otherOrders.filter(o => o.openDate < shiftDate).sort((a,b) => a.openDT > b.openDT ? 1 : -1)) {
+    const m = tryMatch(o);
+    if (m) { usedTxn.add(m.txn.id); foreign.push({ order:o, txn:m.txn, gap:m.gap }); }
+  }
+  const kaspiOnly = txnList.filter(t => !usedTxn.has(t.id));
+  const deliveredToday = orders.filter(o => o.uchDate === shiftDate && o.openDate < shiftDate);
+
+  const totalKaspi = txnList.reduce((s,t) => s + t.amount, 0);
+  const iikoDay    = dayOrders.reduce((s,o) => s + o.sum, 0);
+  return { dayOrders, pairs, foreign, iikoOnly, kaspiOnly, deliveredToday,
+           deliveredTodayAmt: deliveredToday.reduce((s,o)=>s+o.sum,0),
+           totalKaspi, iikoDay, diff: iikoDay - totalKaspi };
+}
+
+// ── Загрузка файла отчёта ──────────────────────────
+function initIikoUpload() {
+  const inp = document.getElementById('iikoFile');
+  if (!inp) return;
+  inp.addEventListener('change', async function(e) {
+    const f = e.target.files[0]; if (!f) return;
+    const z = document.getElementById('iikoZone');
+    z.innerHTML = '<div style="font-size:22px;">⏳</div><div style="font-size:12px;">Читаем отчёт…</div>';
+    try {
+      const buf = await f.arrayBuffer();
+      const wb = XLSX.read(buf, { type:'array', cellDates:true });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const aoa = XLSX.utils.sheet_to_json(ws, { header:1, raw:true, defval:null, blankrows:true });
+      iikoOrders = parseIikoAoa(aoa);
+      iikoPeriod = parseIikoPeriod(aoa);
+      iikoFileName = f.name;
+      if (!iikoOrders.length) throw new Error('В отчёте не найдено ни одного заказа');
+      z.className = 'upload-zone done';
+      z.innerHTML = `<div style="font-size:22px;">✅</div><div style="font-size:13px;font-weight:600;">${f.name}</div>
+        <div style="font-size:11px;color:var(--green);margin-top:3px;">Заказов: ${iikoOrders.length}${iikoPeriod ? ' · период '+ruDate(iikoPeriod.from)+'–'+ruDate(iikoPeriod.to) : ''}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:4px;">нажмите, чтобы загрузить другой</div>`;
+      window._iikoManual = false;
+      renderIiko();
+    } catch (err) {
+      iikoOrders = [];
+      z.className = 'upload-zone';
+      z.innerHTML = `<div style="font-size:22px;">❌</div><div style="font-size:13px;font-weight:600;">Не удалось прочитать отчёт</div><div style="font-size:11px;color:var(--red);margin-top:4px;">${err.message}</div>`;
+    }
+  });
+}
+
+// ── Авторазметка по данным iiko ────────────────────
+function applyAutoMark() {
+  if (!matchRes || !matchRes.pairs.length) { alert('Сначала загрузите отчёт iiko'); return; }
+  let nPre = 0, nDay = 0;
+  for (const p of matchRes.pairs) {
+    const isPre = p.order.uchDate > p.order.openDate;
+    states[p.txn.id] = isPre ? 'prepay' : 'daily';
+    meta[p.txn.id] = meta[p.txn.id] || { orderDate:'', client:'', note:'' };
+    meta[p.txn.id].orderDate = isPre ? p.order.uchDate : '';
+    if (p.order.client) meta[p.txn.id].client = p.order.client;
+    meta[p.txn.id].note = '№' + p.order.num + (p.order.comment ? ' · ' + p.order.comment : '');
+    isPre ? nPre++ : nDay++;
+  }
+  // Оплаты без заказа этой даты (самовывоз, возвраты, ручные суммы) — дневные,
+  // чтобы смена закрывалась; они остаются в списке ❗ для проверки.
+  let nRest = 0;
+  for (const t of matchRes.kaspiOnly) {
+    if (states[t.id] === 'none') { states[t.id] = 'daily'; nRest++; }
+  }
+  renderAll();
+  const st = document.getElementById('saveStatus');
+  if (st) { st.style.color = 'var(--green)'; st.textContent = `✨ Размечено: ${nDay} дневных, ${nPre} предоплат${nRest ? `, ${nRest} без заказа → дневные` : ''}`; }
+}
+
+// ══════════════════════════════════════════════════
+//  СВЕРКА С IIKO — ПО ДАТЕ ПРИНЯТИЯ ЗАКАЗА
+//  Ожидаемый iiko = ВСЯ касса за смену: каждый заказ,
+//  принятый сегодня, создан в iiko сегодня — независимо
+//  от того, на какой день назначена доставка.
+// ══════════════════════════════════════════════════
 function renderIiko() {
   const el = id => document.getElementById(id);
   if (!el('iiko-expected')) return;
 
-  const shiftDate = document.getElementById('rDate').value; // YYYY-MM-DD
+  const shiftDate = el('rDate').value;
+  const dailyAmt  = txns.filter(t => states[t.id]==='daily').reduce((s,t)=>s+t.amount,0);
+  const preAmt    = txns.filter(t => states[t.id]==='prepay').reduce((s,t)=>s+t.amount,0);
+  const unsetAmt  = txns.filter(t => states[t.id]==='none').reduce((s,t)=>s+t.amount,0);
+  const unsetN    = txns.filter(t => states[t.id]==='none').length;
+  const expected  = txns.reduce((s,t)=>s+t.amount,0);   // = Итого Kaspi
 
-  // Дневные заказы
-  const dailyAmt = txns.filter(t => states[t.id]==='daily').reduce((s,t) => s+t.amount, 0);
-
-  // Предоплаты за сегодня (orderDate == shiftDate)
-  const todayPrepays = txns.filter(t =>
-    states[t.id]==='prepay' && meta[t.id]?.orderDate === shiftDate
-  );
-  const todayPrepayAmt = todayPrepays.reduce((s,t) => s+t.amount, 0);
-
-  // Предоплаты за будущую дату (orderDate > shiftDate)
-  const futurePrepays = txns.filter(t =>
-    states[t.id]==='prepay' && meta[t.id]?.orderDate && meta[t.id].orderDate > shiftDate
-  );
-  const futurePrepayAmt = futurePrepays.reduce((s,t) => s+t.amount, 0);
-
-  // Перенесённые предоплаты из прошлых смен (загружены из GAS)
-  const carryAmt   = window._carryoverAmt   || 0;
-  const carryCount = window._carryoverCount || 0;
-
-  // Ожидаемый iiko = Итого Kaspi + Предоплаты сегодня (перенос) - Предоплаты будущие
-  const totalKaspi = txns.reduce((s,t) => s+t.amount, 0);
-  const expected = totalKaspi + carryAmt - futurePrepayAmt;
-
-  el('iiko-daily').textContent  = kFmt(dailyAmt);
-  el('iiko-today').textContent  = todayPrepayAmt ? `${kFmt(todayPrepayAmt)} (${todayPrepays.length} шт)` : '0 ₸';
-  el('iiko-future').textContent = futurePrepayAmt ? `${kFmt(futurePrepayAmt)} (${futurePrepays.length} шт)` : '0 ₸';
+  el('iiko-daily').textContent    = kFmt(dailyAmt);
+  el('iiko-future').textContent   = kFmt(preAmt);
   el('iiko-expected').textContent = kFmt(expected);
+  el('iiko-unset-row').style.display = unsetN ? '' : 'none';
+  if (unsetN) el('iiko-unset').textContent = `${kFmt(unsetAmt)} (${unsetN} шт)`;
 
-  // Перенос из прошлых смен
-  const carryRow = el('iiko-carryover-row');
-  if (carryAmt > 0) {
-    carryRow.style.display = '';
-    el('iiko-carryover').textContent = `${kFmt(carryAmt)} (${carryCount} шт)`;
+  // ── Сопоставление с отчётом ──
+  matchRes = null;
+  const warn = el('iikoWarn'), mb = el('matchBlock');
+  warn.style.display = 'none';
+
+  if (iikoOrders.length && shiftDate) {
+    if (iikoPeriod && (shiftDate < iikoPeriod.from || shiftDate > iikoPeriod.to)) {
+      warn.style.display = '';
+      warn.innerHTML = `⚠️ Отчёт выгружен за период <b>${ruDate(iikoPeriod.from)}–${ruDate(iikoPeriod.to)}</b>, а смена — <b>${ruDate(shiftDate)}</b>. Заказы этой смены в отчёт не попали: выгрузите 0080 так, чтобы период включал дату смены.`;
+    }
+    matchRes = matchOrders(txns, iikoOrders, shiftDate);
+    el('iiko-day-orders').textContent = `${kFmt(matchRes.iikoDay)} (${matchRes.dayOrders.length} шт)`;
+    if (!window._iikoManual) el('iikoActual').value = matchRes.iikoDay || '';
+    renderMatchLists(matchRes, shiftDate);
+    mb.style.display = '';
   } else {
-    carryRow.style.display = 'none';
+    el('iiko-day-orders').textContent = '—';
+    mb.style.display = 'none';
   }
 
-  // Compare with actual iiko
+  // ── Итог сверки ──
+  const badge = el('iikoBadge'), result = el('iikoResult');
   const actualVal = el('iikoActual')?.value;
-  const badge = el('iikoBadge');
-  const result = el('iikoResult');
-
-  if (!actualVal) {
+  if (actualVal === '' || actualVal == null) {
     badge.style.background='var(--ybg)'; badge.style.color='var(--yellow)'; badge.textContent='Ожидание';
-    result.style.color='var(--text3)'; result.innerHTML='Введите фактическую сумму из iiko для сравнения';
+    result.style.color='var(--text3)'; result.innerHTML='Загрузите отчёт 0080 или введите сумму вручную';
     return;
   }
-  const actual = parseInt(actualVal, 10);
+  const actual = Math.round(parseFloat(actualVal)) || 0;
   const diff = actual - expected;
   if (diff === 0) {
     badge.style.background='var(--gbg)'; badge.style.color='var(--green)'; badge.textContent='✅ Сходится';
-    result.style.color='var(--green)'; result.innerHTML=`✅ iiko сходится: <b>${kFmt(actual)}</b>`;
+    result.style.color='var(--green)';
+    result.innerHTML = `✅ Заказы, принятые ${ruDate(shiftDate)}, полностью закрыты кассой: <b>${kFmt(actual)}</b>`;
   } else {
     badge.style.background='var(--rbg)'; badge.style.color='var(--red)'; badge.textContent='❌ Расхождение';
     result.style.color='var(--red)';
-    result.innerHTML=`❌ Расхождение: <b>${kFmt(Math.abs(diff))}</b> ${diff>0?'(iiko больше ожидаемого)':'(iiko меньше ожидаемого)'}<br>
-    <span style="font-size:11px;color:var(--text3);">Ожидалось ${kFmt(expected)}, введено ${kFmt(actual)}</span>`;
+    result.innerHTML = `❌ Расхождение: <b>${kFmt(Math.abs(diff))}</b> ${diff>0?'(в iiko больше, чем в кассе)':'(в кассе больше, чем в iiko)'}<br>
+      <span style="font-size:11px;color:var(--text3);">Касса за смену ${kFmt(expected)}, заказы iiko от ${ruDate(shiftDate)} — ${kFmt(actual)}</span>`;
   }
+}
+
+function renderMatchLists(r, shiftDate) {
+  const cont = document.getElementById('matchLists');
+  const box = (color, title, count, inner) => `
+    <div style="background:var(--bg3);border-radius:8px;border-left:3px solid ${color};padding:10px 12px;margin-bottom:8px;">
+      <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:700;margin-bottom:${inner?'8px':'0'};">
+        <span>${title}</span><span style="color:var(--text3);font-weight:500;">${count}</span>
+      </div>${inner||''}</div>`;
+  const row = (l, c, rr) => `<div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:3px 0;border-top:1px solid var(--border);">
+      <span style="font-family:var(--mono);color:var(--text2);">${l}</span><span style="color:var(--text3);flex:1;">${c}</span><span style="font-family:var(--mono);${rr.style||''}">${rr.txt}</span></div>`;
+
+  let html = '';
+
+  html += box('var(--green)', '✅ Заказ ↔ оплата', `${r.pairs.length} шт · ${kFmt(r.pairs.reduce((s,p)=>s+p.order.sum,0))}`,
+    r.pairs.map(p => row(
+      `${p.txn.time.slice(0,5)} → №${p.order.num}`,
+      `${p.order.client||'—'}${p.order.uchDate > p.order.openDate ? ' · <span style="color:var(--a2)">предоплата на '+ruDate(p.order.uchDate)+'</span>' : ''}${p.gap > 5400 ? ' · <span style="color:var(--yellow)">разрыв '+Math.round(p.gap/60)+' мин</span>' : ''}`,
+      { txt: kFmt(p.order.sum) })).join(''));
+
+  if (r.iikoOnly.length)
+    html += box('var(--red)', '❗ Заказ в iiko есть — оплаты в кассе нет', `${r.iikoOnly.length} шт · ${kFmt(r.iikoOnly.reduce((s,o)=>s+o.sum,0))}`,
+      r.iikoOnly.map(o => row(`${o.openTime.slice(0,5)} №${o.num}`, `${o.client||'—'} · ${o.courier||''}`, { txt: kFmt(o.sum), style:'color:var(--red)' })).join(''));
+
+  if (r.kaspiOnly.length)
+    html += box('var(--yellow)', '❗ Оплата в кассе есть — заказа этой даты нет', `${r.kaspiOnly.length} шт · ${kFmt(r.kaspiOnly.reduce((s,t)=>s+t.amount,0))}`,
+      r.kaspiOnly.map(t => row(t.time.slice(0,5), t.isRefund ? 'возврат' : 'нет заказа с такой суммой', { txt: kFmt(t.amount), style: t.amount<0?'color:var(--red)':'color:var(--yellow)' })).join(''));
+
+  if (r.foreign.length)
+    html += box('var(--a2)', 'ℹ️ Доплата за заказ, принятый раньше', `${r.foreign.length} шт · ${kFmt(r.foreign.reduce((s,f)=>s+f.order.sum,0))}`,
+      r.foreign.map(f => row(`${f.txn.time.slice(0,5)} → №${f.order.num}`, `принят ${ruDate(f.order.openDate)}`, { txt: kFmt(f.order.sum) })).join(''));
+
+  if (r.deliveredToday.length)
+    html += box('var(--text3)', '📦 Доставка сегодня, приняты в прошлые смены', `${r.deliveredToday.length} шт · ${kFmt(r.deliveredTodayAmt)}`,
+      r.deliveredToday.map(o => row(`№${o.num}`, `принят ${ruDate(o.openDate)} · ${o.client||'—'} · деньги в кассе от ${ruDate(o.openDate)}`, { txt: kFmt(o.sum), style:'color:var(--text3)' })).join(''));
+
+  cont.innerHTML = html;
 }
 
 function renderPrepayDetails() {
@@ -969,11 +1219,11 @@ async function closeShift() {
   const prepay  = txns.filter(t=>states[t.id]==='prepay').reduce((s,t)=>s+t.amount,0);
 
   // iiko data
-  const prepayTodayLocal = txns.filter(t=>states[t.id]==='prepay' && meta[t.id]?.orderDate===date).reduce((s,t)=>s+t.amount,0);
+  // Сверка по ДАТЕ ПРИНЯТИЯ ЗАКАЗА: всё, что принято в смену, создано в iiko в эту же смену.
+  // Ожидаемый iiko = вся касса смены. Ничего не переносим между днями.
+  const prepayToday      = txns.filter(t=>states[t.id]==='prepay' && meta[t.id]?.orderDate===date).reduce((s,t)=>s+t.amount,0);
   const prepayFuture     = txns.filter(t=>states[t.id]==='prepay' && meta[t.id]?.orderDate && meta[t.id].orderDate>date).reduce((s,t)=>s+t.amount,0);
-  const carryAmt         = window._carryoverAmt || 0;
-  const prepayToday      = prepayTodayLocal + carryAmt; // предоплаты за сегодня = из текущего PDF + перенос из прошлых смен
-  const expectedIiko     = total + carryAmt - prepayFuture;
+  const expectedIiko     = total;
   const actualIiko   = parseInt(document.getElementById('iikoActual')?.value || '0', 10) || 0;
 
   try {
@@ -1272,6 +1522,7 @@ function updateOpSelect() {
 // ══════════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', () => {
   initClock();
+  initIikoUpload();
   const url = ls('scriptUrl');
   if(url && url !== 'undefined'){ document.getElementById('scriptUrl').value=url; updateConnBadge(true); }
   else if(url === 'undefined'){ localStorage.removeItem('scriptUrl'); }
