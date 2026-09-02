@@ -1237,6 +1237,32 @@ const SET_PARTS = {
   ]
 };
 
+// Филиалы: код + как их пишут в комментарии к доставке и в поставщике накладной
+const BRANCHES = [
+  { code: 'ТТ1',  alias: ['атакент'] },
+  { code: 'ТТ2',  alias: ['сарыарка'] },
+  { code: 'ТТ3',  alias: ['lamiya', 'ламия'] },
+  { code: 'ТТ4',  alias: ['ньютон', 'newton'] },
+  { code: 'ТТ5',  alias: ['таугуль', 'taugul'] },
+  { code: 'ТТ6',  alias: ['автодом'] },
+  { code: 'ТТ7',  alias: [] },
+  { code: 'ТТ8',  alias: ['qaratau', 'каратау'] },
+  { code: 'ТТ9',  alias: ['бесагаш'] },
+  { code: 'ТТ10', alias: [] },
+  { code: 'ТТ11', alias: ['алма сити', 'алма-сити', 'алмасити'] }
+];
+// В iiko встречается и латинская T, и кириллическая Т — сводим к одной
+const latT = s => String(s || '').replace(/T/g, 'Т').replace(/t/g, 'т');
+
+// «опл 6732 ТТ3 14 30» → ТТ3. Цифры без «т» впереди (сумма, время) не считаются.
+function branchesFromText(text) {
+  const t = latT(text).toLowerCase();
+  const out = new Set();
+  for (const m of t.matchAll(/т{1,2}\s*[-–]?\s*(\d{1,2})\b/g)) out.add('ТТ' + m[1]);
+  for (const b of BRANCHES) for (const a of b.alias) if (t.includes(a)) out.add(b.code);
+  return [...out];
+}
+
 // Услуги и строки, которые товаром не являются
 const NOT_GOODS = /достав|сводная цена|услуг|упаковк|пакет/i;
 
@@ -1389,8 +1415,13 @@ function matchDishes(orders, invoices, day) {
     ord.set(k, e);
   };
 
+  const keyBranch = new Map();   // позиция → откуда её ждём
   orders.filter(o => o.uchDate === day).forEach(o => (o.items || []).forEach(it => {
     if (NOT_GOODS.test(it.dish) || it.cat === 'Доптовары') return;
+    branchesFromText(o.comment).forEach(b => {
+      const e = keyBranch.get(nName(it.dish)) || new Set();
+      e.add(b + ' №' + o.num); keyBranch.set(nName(it.dish), e);
+    });
     const parts = SET_PARTS[nName(it.dish)];
     if (parts) {
       setsUsed.push({ set: it.dish, qty: it.qty || 1, num: o.num });
@@ -1425,6 +1456,22 @@ function matchDishes(orders, invoices, day) {
     if (left > 0) wildUsed.push({ label: w.label, name: null, qty: left, set: w.set, covered: all.length > 0 });
   }
 
+  // Откуда ждём товар: филиал из комментария заказа против поставщиков накладных
+  const invBranches = new Set();
+  dayInv.forEach(i => branchesFromText(i.supplier).forEach(b => invBranches.add(b)));
+  const branchMap = new Map();   // код филиала → заказы этого дня
+  const noBranch = [];
+  orders.filter(o => o.uchDate === day).forEach(o => {
+    const bs = branchesFromText(o.comment);
+    if (!bs.length) { noBranch.push(o); return; }
+    bs.forEach(b => {
+      const e = branchMap.get(b) || { code: b, orders: [], hasInvoice: invBranches.has(b) };
+      e.orders.push(o); branchMap.set(b, e);
+    });
+  });
+  const branches = [...branchMap.values()].sort((a, b) =>
+    (a.hasInvoice - b.hasInvoice) || a.code.localeCompare(b.code, 'ru', { numeric: true }));
+
   const keys = [...new Set([...ord.keys(), ...recv.keys()])];
   const okList = [], missing = [], extra = [], diff = [];
   for (const k of keys) {
@@ -1433,12 +1480,13 @@ function matchDishes(orders, invoices, day) {
     const from = ord.get(k)?.from || [];
     if (Math.abs(o - p) < 0.001) okList.push({ name, qty: o, from });
     else if (o === 0) extra.push({ name, o, p });
-    else if (p === 0) missing.push({ name, o, p });
+    else if (p === 0) missing.push({ name, o, p, want: [...(keyBranch.get(k) || [])] });
     else diff.push({ name, o, p, from });
   }
   const byName = (a, b) => a.name.localeCompare(b.name, 'ru');
   return {
     day, invoices: dayInv, setsUsed, wildUsed,
+    branches, noBranch, invBranches: [...invBranches],
     ok: okList.sort(byName), missing: missing.sort(byName),
     extra: extra.sort(byName), diff: diff.sort(byName),
     suppliers: [...new Set(dayInv.map(i => i.supplier).filter(Boolean))]
@@ -1524,9 +1572,21 @@ function renderPrihodLists(r) {
 
   let html = '';
 
+  const waiting = r.branches.filter(b => !b.hasInvoice);
+  if (r.branches.length)
+    html += box(waiting.length ? 'var(--red)' : 'var(--green)',
+      waiting.length ? '🏬 Ждём расход с филиалов' : '🏬 Все филиалы сделали расход',
+      `${r.branches.length} филиалов`,
+      r.branches.map(b => row(
+        b.code + (b.hasInvoice ? '' : ' — накладной нет'),
+        'заказы ' + b.orders.map(o => '№' + o.num).join(', '),
+        b.hasInvoice ? 'приход есть' : 'ждём расход',
+        b.hasInvoice ? 'var(--green)' : 'var(--red)')).join('') +
+      (r.noBranch.length ? row('Филиал не указан в комментарии', r.noBranch.map(o => '№' + o.num).join(', '), r.noBranch.length + ' зак.', 'var(--yellow)') : ''));
+
   if (r.missing.length)
     html += box('var(--red)', '❗ Заказано, но не пришло', `${r.missing.length} поз.`,
-      r.missing.map(x => row(x.name, '', `заказ ${x.o} / приход 0`, 'var(--red)')).join(''));
+      r.missing.map(x => row(x.name, x.want.length ? 'ждём от ' + x.want.join(', ') : '', `заказ ${x.o} / приход 0`, 'var(--red)')).join(''));
 
   if (r.diff.length)
     html += box('var(--yellow)', '≠ Не сходится количество', `${r.diff.length} поз.`,
