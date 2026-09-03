@@ -268,6 +268,24 @@ body{font-family:var(--sans);letter-spacing:-.01em;background:var(--bg);color:va
   .viz-num { width:70px; font-size:11px; }
 }
 
+/* раскрывающийся разбор по категориям и блюдам */
+.dt { border-top:1px solid var(--border); }
+.dt:first-child { border-top:none; }
+.dt > summary { list-style:none; cursor:pointer; padding:9px 0; }
+.dt > summary::-webkit-details-marker { display:none; }
+.dt > summary:hover .viz-name { color:var(--text); }
+.dt-oper > summary { padding:11px 0; }
+.dt-oper .dt-head { display:flex; align-items:center; gap:10px; }
+.dt-oper .dt-head b { font-size:14px; font-weight:700; }
+.dt-oper .dt-head .dt-tot { margin-left:auto; font-family:var(--mono); font-size:12px; color:var(--text2); }
+.dt-body { padding:2px 0 10px 0; }
+.dt-dish { display:flex; gap:10px; font-size:12px; padding:3px 0 3px 114px; color:var(--text2); }
+.dt-dish span:first-child { flex:1; min-width:0; }
+.dt-dish span:last-child { font-family:var(--mono); color:var(--text); font-weight:600; white-space:nowrap; }
+.chev { display:inline-block; width:11px; color:var(--text3); transition:transform .2s; }
+details[open] > summary .chev { transform:rotate(90deg); }
+@media(max-width:700px){ .dt-dish { padding-left:0; } }
+
 /* ── G2 GRID ─────────────────────────── */
 .g2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
 @media(max-width:900px){ .g2 { grid-template-columns:1fr; } }
@@ -763,10 +781,18 @@ body{font-family:var(--sans);letter-spacing:-.01em;background:var(--bg);color:va
           <div id="chartOper"></div>
         </div>
         <div class="card">
-          <div class="card-head"><div class="card-title">🏆 Сеты и торты</div>
-            <div class="viz-legend" id="legendGoods"></div></div>
-          <div id="chartGoods"></div>
+          <div class="card-head"><div class="card-title">🍰 Категории за период</div><span class="badge ba" id="anCatTotal"></span></div>
+          <div id="chartCats"></div>
         </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div><div class="card-title">🏆 Продажи по операторам</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px;">нажмите на категорию — покажет, что именно продано. Строки с пометкой «мод.» оператор дописал вручную, в счёт не идут</div></div>
+          <span class="badge bb" id="anGoodsHint"></span>
+        </div>
+        <div id="chartGoods"></div>
       </div>
 
       <div class="card">
@@ -1092,10 +1118,11 @@ function parseIikoAoa(aoa) {
   const cClient = C('фио клиента'), cPhone = C('телефон клиента');
   const cComment = C('комментарий к доставке'), cAddr = C('адрес'), cDish = C('блюдо');
   const cCat = C('категория блюда'), cQty = C('количество блюд'), cDType = C('тип доставки');
+  const cIType = C('тип товара');
   const cSum = C('сумма со скидкой, тенге') >= 0 ? C('сумма со скидкой, тенге') : C('сумма со скидкой');
   if (cOpen < 0 || cSum < 0) throw new Error('В отчёте нет колонок «Время открытия» / «Сумма со скидкой»');
 
-  const orders = []; let cur = null;
+  const orders = []; let cur = null, curType = '';
   for (let r = hRow + 1; r < aoa.length; r++) {
     const row = aoa[r] || [];
     const openStr = String(row[cOpen] == null ? '' : row[cOpen]).trim();
@@ -1115,16 +1142,22 @@ function parseIikoAoa(aoa) {
           addr: String((cAddr>=0?row[cAddr]:'')||'').trim(),
           sum: 0, items: []
         };
-        orders.push(cur);
+        orders.push(cur); curType = '';
       } else cur = null;
     }
     if (!cur) continue;
+    // «Тип товара» стоит только у первой строки группы и действует до следующей.
+    // Без этого модификаторы (состав сета, выписанный вручную) выглядят
+    // обычными блюдами и задваивают количество.
+    const rawType = cIType >= 0 ? String(row[cIType]||'').trim() : '';
+    if (rawType && !/всего/i.test(rawType)) curType = rawType;
     const dish = cDish >= 0 ? String(row[cDish]||'').trim() : '';
     if (!dish) continue;                     // строки-итоги («Блюдо всего», «… всего»)
     cur.sum += numOrZero(row[cSum]);
     cur.items.push({
       dish,
       cat: cCat >= 0 ? String(row[cCat]||'').trim() : '',
+      type: curType,
       qty: cQty >= 0 ? numOrZero(row[cQty]) : 0,
       sum: numOrZero(row[cSum])
     });
@@ -1924,32 +1957,77 @@ function renderAnalytics() {
     ['Самовывоз', pickup + ' шт', Math.round(pickup / anOrders.length * 100) + '% заказов']
   ].map(([l, v, s]) => `<div class="kpi"><div class="kpi-label">${l}</div><div class="kpi-val">${v}</div><div class="kpi-sub">${s}</div></div>`).join('');
 
-  // Выручка по операторам
+  // Выручка по операторам, с раскрытием по дням выбранного разреза
   const byOper = {};
   anOrders.forEach(o => {
-    const n = o.oper || '— не указан';
-    (byOper[n] = byOper[n] || { sum:0, n:0 }); byOper[n].sum += o.sum; byOper[n].n++;
+    const n = shortName(o.oper || '— не указан');
+    const e = byOper[n] = byOper[n] || { label:n, sum:0, n:0, days:{} };
+    e.sum += o.sum; e.n++;
+    const d = anDate(o) || '—';
+    const dd = e.days[d] = e.days[d] || { sum:0, n:0 };
+    dd.sum += o.sum; dd.n++;
   });
-  const operRows = Object.entries(byOper).sort((a,b) => b[1].sum - a[1].sum)
-    .map(([k, v]) => ({ label: shortName(k), value: v.sum, note: v.n + ' заказов' }));
-  document.getElementById('chartOper').innerHTML = barChart(operRows, { fmt: kFmt });
+  const operRows = Object.values(byOper).sort((a,b) => b.sum - a.sum);
+  const operMax = Math.max(1, ...operRows.map(r => r.sum));
+  document.getElementById('chartOper').innerHTML = operRows.map((r, i) => {
+    const days = Object.entries(r.days).sort((a,b) => a[0] < b[0] ? -1 : 1);
+    const dMax = Math.max(1, ...days.map(d => d[1].sum));
+    return `
+    <details class="dt"${i === 0 ? ' open' : ''}>
+      <summary>
+        <div class="viz-row">
+          <div class="viz-name"><span class="chev">▶</span> ${r.label}</div>
+          <div class="viz-track"><div class="viz-bar" style="width:${Math.max(2, r.sum/operMax*100)}%;background:${VIZ.s1}"></div></div>
+          <div class="viz-num">${kFmt(r.sum)}</div>
+        </div>
+      </summary>
+      <div class="dt-body">
+        ${days.map(([d, v]) => `
+          <div class="viz-row">
+            <div class="viz-sub">${ruDate(d)}</div>
+            <div class="viz-track" style="height:9px;"><div class="viz-bar" style="width:${Math.max(2, v.sum/dMax*100)}%;background:${VIZ.s3}"></div></div>
+            <div class="viz-num" style="font-weight:500;">${kFmt(v.sum)}</div>
+          </div>`).join('')}
+        <div style="font-size:11px;color:var(--text3);padding:6px 0 2px 114px;">${r.n} заказов · средний чек ${kFmt(Math.round(r.sum / r.n))}</div>
+      </div>
+    </details>`; }).join('') || '<div style="font-size:12px;color:var(--text3);">Нет данных</div>';
   document.getElementById('anOpTotal').textContent = operRows.length + ' операторов';
 
-  // Сеты и торты по операторам
-  const goods = {};
+  // Категории за период и продажи по операторам — со всеми категориями отчёта
+  const periodCats = {}, byOper2 = {};
   anOrders.forEach(o => {
     const n = shortName(o.oper || '— не указан');
-    const g = goods[n] = goods[n] || { label:n, sets:0, cakes:0 };
+    const e = byOper2[n] = byOper2[n] || { label:n, cats:{}, qty:0, sum:0 };
     (o.items || []).forEach(it => {
-      if (it.cat === CAT_SET)  g.sets  += it.qty || 0;
-      if (it.cat === CAT_CAKE) g.cakes += it.qty || 0;
+      const cat = it.cat || '— без категории';
+      if (it.type === 'Услуга' || NOT_GOODS.test(it.dish)) return;   // доставка — не товар
+      // Модификаторы оператор дописывает руками, суммы у них нет и они
+      // повторяют позиции заказа. Считаем отдельно, чтобы не задваивать.
+      const mod = it.type === 'Модификатор';
+      const q = it.qty || 0, m = it.sum || 0;
+      const add = (bag) => {
+        const c = bag[cat] = bag[cat] || { qty:0, modQty:0, sum:0, dishes:{} };
+        const d = c.dishes[it.dish] = c.dishes[it.dish] || { qty:0, sum:0, mod:mod };
+        if (mod) { c.modQty += q; d.mod = true; } else { c.qty += q; }
+        c.sum += m; d.qty += q; d.sum += m;
+      };
+      add(e.cats); add(periodCats);
+      if (!mod) e.qty += q;
+      e.sum += m;
     });
   });
-  const goodsSeries = [{ key:'sets', name:'Сеты', color:VIZ.s1 }, { key:'cakes', name:'Торты', color:VIZ.s2 }];
-  const goodsRows = Object.values(goods).filter(g => g.sets || g.cakes)
-    .sort((a,b) => (b.sets + b.cakes) - (a.sets + a.cakes));
-  document.getElementById('chartGoods').innerHTML = groupChart(goodsRows, goodsSeries);
-  document.getElementById('legendGoods').innerHTML = legend(goodsSeries);
+
+  document.getElementById('chartCats').innerHTML = catBlock(periodCats);
+  document.getElementById('anCatTotal').textContent = Object.keys(periodCats).length + ' категорий';
+
+  const opers = Object.values(byOper2).filter(e => e.qty).sort((a,b) => b.sum - a.sum);
+  document.getElementById('chartGoods').innerHTML = opers.map((e, i) => `
+    <details class="dt dt-oper"${i === 0 ? ' open' : ''}>
+      <summary><div class="dt-head"><span class="chev">▶</span><b>${e.label}</b>
+        <span class="dt-tot">${qFmt(e.qty)} шт · ${kFmt(Math.round(e.sum))}</span></div></summary>
+      <div class="dt-body">${catBlock(e.cats)}</div>
+    </details>`).join('') || '<div style="font-size:12px;color:var(--text3);">Нет данных</div>';
+  document.getElementById('anGoodsHint').textContent = opers.length + ' операторов';
 
   // Заказы по дням: курьером против самовывоза
   const byDay = {};
@@ -1986,6 +2064,33 @@ function renderAnalytics() {
   const uch = [...new Set(anOrders.map(o => o.uchDate))].sort().reverse();
   sel.innerHTML = uch.map(d => `<option value="${d}">${ruDate(d)}</option>`).join('');
   renderRetro();
+}
+
+// Количество: целое как есть, дробное с запятой (бауырсақ идёт килограммами)
+const qFmt = n => Number.isInteger(n) ? String(n) : (Math.round(n * 10) / 10).toFixed(1).replace('.', ',');
+
+// Категории с раскрытием до блюд. Полосы одного цвета — это величина,
+// а не разные сущности, поэтому цвет здесь ничего не кодирует.
+function catBlock(cats) {
+  const rows = Object.entries(cats).sort((a, b) => b[1].qty - a[1].qty);
+  if (!rows.length) return '<div style="font-size:12px;color:var(--text3);">Нет данных</div>';
+  const max = Math.max(1, ...rows.map(r => r[1].qty));
+  return rows.map(([name, c]) => {
+    const dishes = Object.entries(c.dishes).sort((a, b) => b[1].qty - a[1].qty);
+    return `
+    <details class="dt">
+      <summary>
+        <div class="viz-row">
+          <div class="viz-name"><span class="chev">▶</span> ${name}</div>
+          <div class="viz-track"><div class="viz-bar" style="width:${Math.max(2, c.qty / max * 100)}%;background:${VIZ.s1}"></div></div>
+          <div class="viz-num">${qFmt(c.qty)} шт${c.modQty ? '<span style="color:var(--text3);font-weight:400;"> +' + qFmt(c.modQty) + '</span>' : ''}</div>
+        </div>
+      </summary>
+      <div class="dt-body">
+        ${dishes.map(([d, v]) => `<div class="dt-dish"><span>${d}${v.mod ? ' <i style="font-style:normal;font-size:10px;color:var(--text3);border:1px solid var(--border);border-radius:5px;padding:0 4px;">мод.</i>' : ''}</span><span>${qFmt(v.qty)}${v.sum ? ' · ' + kFmt(Math.round(v.sum)) : ''}</span></div>`).join('')}
+      </div>
+    </details>`;
+  }).join('');
 }
 
 // Фамилия оператора коротко: «Байкенова Жания Муратбекқызы» → «Жания Б.»
