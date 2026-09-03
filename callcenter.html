@@ -1263,6 +1263,17 @@ function branchesFromText(text) {
   return [...out];
 }
 
+// ── Словарь названий ──────────────────────────────
+// Оператор пишет одно, в номенклатуре другое — часто просто перевод.
+// Алгоритмом такое не вывести, поэтому список явный: слева как пишут
+// в заказе, справа как называется в приходе. Дополняйте по мере надобности.
+const SYNONYMS = {
+  'куриный пирог' : 'Тауық етті бәліші',
+  'яблочный кекс' : 'Алмалы кекс',
+  'шу с малиной'  : 'Таңқурайлы шу',
+  'шу тәттісі'    : 'Пирожное Шу'
+};
+
 // Услуги и строки, которые товаром не являются
 const NOT_GOODS = /достав|сводная цена|услуг|упаковк|пакет/i;
 
@@ -1308,6 +1319,15 @@ function tokMatch(a0, b0) {
 
 // Сопоставление названий. Слова взвешены по редкости в приходе: редкое
 // («муравейник») связывает позиции, частое («бөрек») — само по себе нет.
+// Ищем каноническое название по словарю: и как есть, и с приведением букв
+function synonymOf(name) {
+  const k = nName(name);
+  if (SYNONYMS[k]) return SYNONYMS[k];
+  const f = fold(k);
+  for (const key in SYNONYMS) if (fold(key) === f) return SYNONYMS[key];
+  return null;
+}
+
 function makeScorer(recvNames) {
   const df = new Map();
   recvNames.forEach(n => new Set(nTokens(n)).forEach(t => df.set(t, (df.get(t) || 0) + 1)));
@@ -1404,13 +1424,14 @@ function matchDishes(orders, invoices, day) {
   const score = makeScorer([...recv.values()].map(v => v.name));
   const ord = new Map(), wild = [], setsUsed = [];
   const addOrd = (name, qty, from) => {
-    let k = nName(name);
-    if (!recv.has(k)) {                      // подтягиваем к названию из прихода
+    const canon = synonymOf(name);           // явный словарь — приоритетнее догадок
+    let k = nName(canon || name);
+    if (!recv.has(k) && !canon) {            // подтягиваем к названию из прихода
       let best = null, bs = 0;
       for (const [rk, rv] of recv) { const sc = score(name, rv.name); if (sc > bs) { bs = sc; best = rk; } }
       if (bs >= 0.45) k = best;
     }
-    const e = ord.get(k) || { name: recv.get(k)?.name || name, qty: 0, from: [] };
+    const e = ord.get(k) || { name: recv.get(k)?.name || canon || name, qty: 0, from: [] };
     e.qty += qty; if (from) e.from.push(from);
     ord.set(k, e);
   };
