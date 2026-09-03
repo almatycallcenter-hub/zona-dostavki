@@ -247,6 +247,27 @@ body{font-family:var(--sans);letter-spacing:-.01em;background:var(--bg);color:va
 .sv-total .sv-val   { font-size:18px; }
 .divider { height:1px; background:var(--border); margin:10px 0; }
 
+/* ── ГРАФИКИ ─────────────────────────── */
+.viz { display:flex; flex-direction:column; gap:9px; }
+.viz-row { display:flex; align-items:center; gap:10px; }
+.viz-name { width:104px; flex:none; font-size:12px; color:var(--text2); text-align:right;
+            overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.viz-sub  { width:104px; flex:none; font-size:11px; color:var(--text3); text-align:right; }
+.viz-track{ flex:1; min-width:0; height:14px; background:var(--bg3); border-radius:7px; overflow:hidden; }
+.viz-bar  { height:100%; border-radius:0 4px 4px 0; transition:width .5s cubic-bezier(.2,.7,.3,1); }
+.viz-num  { width:82px; flex:none; font-family:var(--mono); font-size:12px; font-weight:600;
+            text-align:right; color:var(--text); }
+.viz-grp  { padding-bottom:6px; }
+.viz-grp > .viz-name { text-align:left; width:auto; font-weight:600; color:var(--text); }
+.viz-grp + .viz-grp { border-top:1px solid var(--border); padding-top:9px; }
+.viz-legend { display:flex; gap:12px; flex-wrap:wrap; }
+.viz-key  { display:inline-flex; align-items:center; gap:5px; font-size:11px; color:var(--text2); }
+.viz-key i{ width:9px; height:9px; border-radius:3px; display:inline-block; }
+@media(max-width:700px){
+  .viz-name,.viz-sub { width:76px; font-size:11px; }
+  .viz-num { width:70px; font-size:11px; }
+}
+
 /* ── G2 GRID ─────────────────────────── */
 .g2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
 @media(max-width:900px){ .g2 { grid-template-columns:1fr; } }
@@ -380,6 +401,9 @@ body{font-family:var(--sans);letter-spacing:-.01em;background:var(--bg);color:va
     <button class="nav-item" onclick="go('kaspi')">
       <span class="icon">💳</span> Касса
     </button>
+    <button class="nav-item" onclick="go('analytics')">
+      <span class="icon">📈</span> Аналитика
+    </button>
     <div class="sb-section">Производство</div>
     <button class="nav-item" onclick="openApp('calc')">
       <span class="icon">🗺️</span> Калькулятор
@@ -405,6 +429,9 @@ body{font-family:var(--sans);letter-spacing:-.01em;background:var(--bg);color:va
   </button>
   <button class="mob-nav-btn" id="mn-kaspi" onclick="go('kaspi')">
     <span class="mn-icon">💳</span>Касса
+  </button>
+  <button class="mob-nav-btn" id="mn-analytics" onclick="go('analytics')">
+    <span class="mn-icon">📈</span>Аналитика
   </button>
   <button class="mob-nav-btn" id="mn-calc" onclick="openApp('calc')">
     <span class="mn-icon">🗺️</span>Доставка
@@ -681,6 +708,97 @@ body{font-family:var(--sans);letter-spacing:-.01em;background:var(--bg);color:va
   </div><!-- /page-body -->
 </div><!-- /page-kaspi -->
 
+
+<!-- АНАЛИТИКА ─────────────────────────── -->
+<div class="page" id="page-analytics">
+  <div class="page-header">
+    <div><div class="page-title">📈 Аналитика</div><div class="page-sub">0080 за период · операторы, блюда, филиалы</div></div>
+    <button class="btn btn-o btn-sm" onclick="resetAnalytics()">↺ Сбросить</button>
+  </div>
+  <div class="page-body">
+
+    <div class="card">
+      <div class="card-head">
+        <div><div class="card-title">📂 Данные за период</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px;">выгрузите 0080 сразу за месяц — он умеет за период</div></div>
+        <span class="badge by" id="anBadge">Нет данных</span>
+      </div>
+      <div class="g2">
+        <div>
+          <div class="upload-zone" id="anZone" style="padding:18px;margin-bottom:0;" onclick="document.getElementById('anFile').click()">
+            <div style="font-size:24px;margin-bottom:6px;">📊</div>
+            <div style="font-size:13px;font-weight:700;">Отчёт 0080 за период</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:3px;">«Отчёт по доставкам» .xlsx</div>
+          </div>
+          <input type="file" id="anFile" accept=".xlsx,.xls" style="display:none;">
+        </div>
+        <div>
+          <div class="upload-zone" id="anPrihodZone" style="padding:18px;margin-bottom:0;" onclick="document.getElementById('anPrihodFile').click()">
+            <div style="font-size:24px;margin-bottom:6px;">🧾</div>
+            <div style="font-size:13px;font-weight:700;">Приходные накладные</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:3px;">необязательно — для сверки блюд за прошлые дни</div>
+          </div>
+          <input type="file" id="anPrihodFile" accept=".xls,.xlsx" style="display:none;">
+        </div>
+      </div>
+    </div>
+
+    <div id="anContent" style="display:none;">
+
+      <div class="kpi-row" id="anKpi"></div>
+
+      <!-- фильтры одной строкой над графиками -->
+      <div class="card" style="padding:12px 16px;">
+        <div class="txn-filters" style="align-items:center;">
+          <span style="font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.6px;margin-right:4px;">Считать по</span>
+          <div class="filter-pill active" id="cut-open" onclick="setCut('open',this)">дате принятия</div>
+          <div class="filter-pill" id="cut-uch" onclick="setCut('uch',this)">учётному дню</div>
+        </div>
+        <div id="anCutHint" style="font-size:11.5px;color:var(--text3);margin-top:7px;"></div>
+      </div>
+
+      <div class="g2">
+        <div class="card">
+          <div class="card-head"><div class="card-title">💰 Выручка по операторам</div><span class="badge ba" id="anOpTotal"></span></div>
+          <div id="chartOper"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><div class="card-title">🏆 Сеты и торты</div>
+            <div class="viz-legend" id="legendGoods"></div></div>
+          <div id="chartGoods"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><div class="card-title">📅 Заказы по дням</div>
+          <div class="viz-legend" id="legendDays"></div></div>
+        <div id="chartDays"></div>
+      </div>
+
+      <div class="g2">
+        <div class="card">
+          <div class="card-head"><div class="card-title">🏬 Откуда заказы</div><span class="badge bb" id="anBrHint"></span></div>
+          <div id="chartBranch"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><div class="card-title">🛵 Служба доставки</div></div>
+          <div id="chartCourier"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div><div class="card-title">📦 Сверка блюд за прошлый день</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px;">выберите дату — сверим заказы с приходными накладными</div></div>
+          <select class="fi" id="anRetroDate" style="width:auto;min-width:150px;" onchange="renderRetro()"></select>
+        </div>
+        <div id="anRetroResult" style="font-size:13px;color:var(--text3);">Загрузите накладные, чтобы сверить блюда</div>
+        <div id="anRetroLists" style="margin-top:12px;"></div>
+      </div>
+
+    </div>
+  </div>
+</div>
 
 <!-- НАСТРОЙКИ ─────────────────────────── -->
 <div class="page" id="page-settings">
@@ -973,7 +1091,7 @@ function parseIikoAoa(aoa) {
   const cOper = C('оператор доставки'), cNum = C('номер доставки'), cCourier = C('курьер');
   const cClient = C('фио клиента'), cPhone = C('телефон клиента');
   const cComment = C('комментарий к доставке'), cAddr = C('адрес'), cDish = C('блюдо');
-  const cCat = C('категория блюда'), cQty = C('количество блюд');
+  const cCat = C('категория блюда'), cQty = C('количество блюд'), cDType = C('тип доставки');
   const cSum = C('сумма со скидкой, тенге') >= 0 ? C('сумма со скидкой, тенге') : C('сумма со скидкой');
   if (cOpen < 0 || cSum < 0) throw new Error('В отчёте нет колонок «Время открытия» / «Сумма со скидкой»');
 
@@ -990,6 +1108,7 @@ function parseIikoAoa(aoa) {
           oper: String((cOper>=0?row[cOper]:'')||'').split('/')[0].trim(),
           num: String((cNum>=0?row[cNum]:'')||'').trim(),
           courier: String((cCourier>=0?row[cCourier]:'')||'').trim(),
+          dtype: String((cDType>=0?row[cDType]:'')||'').trim(),
           client: String((cClient>=0?row[cClient]:'')||'').trim(),
           phone: String((cPhone>=0?row[cPhone]:'')||'').trim(),
           comment: String((cComment>=0?row[cComment]:'')||'').trim(),
@@ -1599,7 +1718,7 @@ function renderPrihod() {
   renderPrihodLists(r);
 }
 
-function renderPrihodLists(r) {
+function renderPrihodLists(r, target) {
   const box = (color, title, count, inner) => `
     <div style="background:var(--bg3);border-radius:8px;border-left:3px solid ${color};padding:10px 12px;margin-bottom:8px;">
       <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;font-weight:700;margin-bottom:${inner?'8px':'0'};">
@@ -1648,7 +1767,260 @@ function renderPrihodLists(r) {
     html += box('var(--green)', '✅ Сошлось', `${r.ok.length} поз.`,
       r.ok.map(x => row(x.name, x.from.join(', '), x.qty, 'var(--green)')).join(''));
 
-  document.getElementById('prihodLists').innerHTML = html;
+  document.getElementById(target || 'prihodLists').innerHTML = html;
+}
+
+// ══════════════════════════════════════════════════
+//  АНАЛИТИКА ЗА ПЕРИОД
+//  Один отчёт 0080 за месяц → выручка по операторам,
+//  рейтинг по сетам и тортам, заказы по дням,
+//  филиалы, службы доставки, ретро-сверка с приходом.
+// ══════════════════════════════════════════════════
+let anOrders = [], anInvoices = [], anCut = 'open';   // 'open' — дата принятия, 'uch' — учётный день
+
+const CAT_SET  = 'Чайные сеты';
+const CAT_CAKE = 'Торттар';
+
+// Палитра графиков: проверена валидатором на светлой поверхности
+// (разделение для дальтоников ΔE 9.2, обычное зрение 27.6).
+// У аквы контраст ниже 3:1 — поэтому у каждой полосы стоит подпись значением.
+const VIZ = { s1:'#2a78d6', s2:'#eb6834', s3:'#1baf7a' };
+
+const anDate = o => (anCut === 'uch' ? o.uchDate : o.openDate);
+const short  = n => n >= 1e6 ? (n/1e6).toFixed(1).replace('.',',')+' млн'
+                : n >= 1e3 ? Math.round(n/1e3)+' тыс' : String(Math.round(n));
+
+// ── Загрузка ──
+function initAnalyticsUpload() {
+  const f = document.getElementById('anFile');
+  if (f) f.addEventListener('change', async e => {
+    const file = e.target.files[0]; if (!file) return;
+    const z = document.getElementById('anZone');
+    z.innerHTML = '<div style="font-size:22px;">⏳</div><div style="font-size:12px;">Читаем отчёт…</div>';
+    try {
+      const wb = XLSX.read(await file.arrayBuffer(), { type:'array' });
+      const aoa = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header:1, raw:true, defval:null, blankrows:true });
+      anOrders = parseIikoAoa(aoa);
+      if (!anOrders.length) throw new Error('В отчёте нет заказов');
+      const per = parseIikoPeriod(aoa);
+      z.className = 'upload-zone done';
+      z.innerHTML = `<div style="font-size:22px;">✅</div><div style="font-size:13px;font-weight:600;">${file.name}</div>
+        <div style="font-size:11px;color:var(--green);margin-top:3px;">Заказов: ${anOrders.length}${per ? ' · период '+ruDate(per.from)+'–'+ruDate(per.to) : ''}</div>`;
+      renderAnalytics();
+    } catch (err) {
+      anOrders = [];
+      z.className = 'upload-zone';
+      z.innerHTML = `<div style="font-size:22px;">❌</div><div style="font-size:13px;font-weight:600;">Не прочитался</div><div style="font-size:11px;color:var(--red);margin-top:4px;">${err.message}</div>`;
+    }
+  });
+
+  const pf = document.getElementById('anPrihodFile');
+  if (pf) pf.addEventListener('change', async e => {
+    const file = e.target.files[0]; if (!file) return;
+    const z = document.getElementById('anPrihodZone');
+    z.innerHTML = '<div style="font-size:22px;">⏳</div><div style="font-size:12px;">Читаем накладные…</div>';
+    try {
+      const wb = XLSX.read(await file.arrayBuffer(), { type:'array' });
+      const aoa = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header:1, raw:true, defval:null, blankrows:true });
+      anInvoices = parsePrihodAoa(aoa);
+      if (!anInvoices.length) throw new Error('Накладные не найдены');
+      const dates = [...new Set(anInvoices.map(i => i.date).filter(Boolean))].sort();
+      z.className = 'upload-zone done';
+      z.innerHTML = `<div style="font-size:22px;">✅</div><div style="font-size:13px;font-weight:600;">${file.name}</div>
+        <div style="font-size:11px;color:var(--green);margin-top:3px;">Накладных: ${anInvoices.length}${dates.length ? ' · '+dates.map(ruDate).join(', ') : ''}</div>`;
+      renderRetro();
+    } catch (err) {
+      anInvoices = [];
+      z.className = 'upload-zone';
+      z.innerHTML = `<div style="font-size:22px;">❌</div><div style="font-size:13px;font-weight:600;">Не прочитались</div><div style="font-size:11px;color:var(--red);margin-top:4px;">${err.message}</div>`;
+    }
+  });
+}
+
+function resetAnalytics() {
+  anOrders = []; anInvoices = [];
+  ['anZone','anPrihodZone'].forEach(id => { const z = document.getElementById(id); if (z) z.className = 'upload-zone'; });
+  location.hash = '#analytics'; location.reload();
+}
+
+function setCut(c, el) {
+  anCut = c;
+  document.querySelectorAll('#cut-open,#cut-uch').forEach(p => p.classList.remove('active'));
+  el.classList.add('active');
+  renderAnalytics();
+}
+
+// ── Рисование полос ───────────────────────────────
+// Горизонтальные полосы: подпись значением у каждой (обязательна,
+// потому что цвет не должен быть единственным носителем смысла).
+function barChart(rows, opts) {
+  const o = opts || {};
+  const max = Math.max(1, ...rows.map(r => r.value));
+  if (!rows.length) return '<div style="font-size:12px;color:var(--text3);padding:8px 0;">Нет данных</div>';
+  return '<div class="viz">' + rows.map(r => `
+    <div class="viz-row" title="${r.label}: ${o.fmt ? o.fmt(r.value) : r.value}${r.note ? ' · ' + r.note : ''}">
+      <div class="viz-name">${r.label}</div>
+      <div class="viz-track"><div class="viz-bar" style="width:${Math.max(2, r.value / max * 100)}%;background:${r.color || VIZ.s1}"></div></div>
+      <div class="viz-num">${o.fmt ? o.fmt(r.value) : r.value}</div>
+    </div>`).join('') + '</div>';
+}
+
+// Две серии рядом — с легендой и подписями
+function groupChart(rows, series) {
+  const max = Math.max(1, ...rows.flatMap(r => series.map(s => r[s.key] || 0)));
+  if (!rows.length) return '<div style="font-size:12px;color:var(--text3);padding:8px 0;">Нет данных</div>';
+  return '<div class="viz">' + rows.map(r => `
+    <div class="viz-grp">
+      <div class="viz-name" style="width:auto;margin-bottom:4px;">${r.label}</div>
+      ${series.map(s => `
+        <div class="viz-row" title="${r.label} · ${s.name}: ${r[s.key] || 0}">
+          <div class="viz-sub">${s.name}</div>
+          <div class="viz-track"><div class="viz-bar" style="width:${Math.max(2,(r[s.key]||0)/max*100)}%;background:${s.color}"></div></div>
+          <div class="viz-num">${r[s.key] || 0}</div>
+        </div>`).join('')}
+    </div>`).join('') + '</div>';
+}
+
+// Дни: две категории в одной полосе, между сегментами зазор 2px
+function stackChart(days, series) {
+  const max = Math.max(1, ...days.map(d => series.reduce((s, x) => s + (d[x.key] || 0), 0)));
+  if (!days.length) return '<div style="font-size:12px;color:var(--text3);padding:8px 0;">Нет данных</div>';
+  return '<div class="viz">' + days.map(d => {
+    const tot = series.reduce((s, x) => s + (d[x.key] || 0), 0);
+    return `
+    <div class="viz-row" title="${ruDate(d.date)}: ${series.map(s => s.name + ' ' + (d[s.key]||0)).join(' · ')}">
+      <div class="viz-name">${ruDate(d.date)}</div>
+      <div class="viz-track" style="display:flex;gap:2px;">
+        ${series.map(s => (d[s.key] ? `<div class="viz-bar" style="width:${d[s.key]/max*100}%;background:${s.color}"></div>` : '')).join('')}
+      </div>
+      <div class="viz-num">${tot}</div>
+    </div>`; }).join('') + '</div>';
+}
+
+const legend = series => series.map(s =>
+  `<span class="viz-key"><i style="background:${s.color}"></i>${s.name}</span>`).join('');
+
+// ── Сводка ────────────────────────────────────────
+function renderAnalytics() {
+  const box = document.getElementById('anContent');
+  if (!box) return;
+  if (!anOrders.length) { box.style.display = 'none'; return; }
+  box.style.display = '';
+  document.getElementById('anBadge').textContent = anOrders.length + ' заказов';
+  document.getElementById('anBadge').className = 'badge bg';
+
+  const dates = [...new Set(anOrders.map(anDate))].sort();
+  const revenue = anOrders.reduce((s, o) => s + o.sum, 0);
+  const pickup  = anOrders.filter(o => /самовывоз/i.test(o.dtype || o.courier)).length;
+
+  document.getElementById('anCutHint').textContent = anCut === 'uch'
+    ? '— заказ засчитан в день доставки'
+    : '— заказ засчитан в день, когда его приняли';
+
+  document.getElementById('anKpi').innerHTML = [
+    ['Выручка', kFmt(revenue), dates.length + ' дней'],
+    ['Заказов', String(anOrders.length), (anOrders.length / (dates.length||1)).toFixed(1) + ' в день'],
+    ['Средний чек', kFmt(Math.round(revenue / anOrders.length)), ''],
+    ['Самовывоз', pickup + ' шт', Math.round(pickup / anOrders.length * 100) + '% заказов']
+  ].map(([l, v, s]) => `<div class="kpi"><div class="kpi-label">${l}</div><div class="kpi-val">${v}</div><div class="kpi-sub">${s}</div></div>`).join('');
+
+  // Выручка по операторам
+  const byOper = {};
+  anOrders.forEach(o => {
+    const n = o.oper || '— не указан';
+    (byOper[n] = byOper[n] || { sum:0, n:0 }); byOper[n].sum += o.sum; byOper[n].n++;
+  });
+  const operRows = Object.entries(byOper).sort((a,b) => b[1].sum - a[1].sum)
+    .map(([k, v]) => ({ label: shortName(k), value: v.sum, note: v.n + ' заказов' }));
+  document.getElementById('chartOper').innerHTML = barChart(operRows, { fmt: kFmt });
+  document.getElementById('anOpTotal').textContent = operRows.length + ' операторов';
+
+  // Сеты и торты по операторам
+  const goods = {};
+  anOrders.forEach(o => {
+    const n = shortName(o.oper || '— не указан');
+    const g = goods[n] = goods[n] || { label:n, sets:0, cakes:0 };
+    (o.items || []).forEach(it => {
+      if (it.cat === CAT_SET)  g.sets  += it.qty || 0;
+      if (it.cat === CAT_CAKE) g.cakes += it.qty || 0;
+    });
+  });
+  const goodsSeries = [{ key:'sets', name:'Сеты', color:VIZ.s1 }, { key:'cakes', name:'Торты', color:VIZ.s2 }];
+  const goodsRows = Object.values(goods).filter(g => g.sets || g.cakes)
+    .sort((a,b) => (b.sets + b.cakes) - (a.sets + a.cakes));
+  document.getElementById('chartGoods').innerHTML = groupChart(goodsRows, goodsSeries);
+  document.getElementById('legendGoods').innerHTML = legend(goodsSeries);
+
+  // Заказы по дням: курьером против самовывоза
+  const byDay = {};
+  anOrders.forEach(o => {
+    const d = anDate(o); if (!d) return;
+    const e = byDay[d] = byDay[d] || { date:d, courier:0, pickup:0 };
+    if (/самовывоз/i.test(o.dtype || o.courier)) e.pickup++; else e.courier++;
+  });
+  const daySeries = [{ key:'courier', name:'Курьером', color:VIZ.s1 }, { key:'pickup', name:'Самовывоз', color:VIZ.s2 }];
+  document.getElementById('chartDays').innerHTML = stackChart(Object.values(byDay).sort((a,b) => a.date < b.date ? -1 : 1), daySeries);
+  document.getElementById('legendDays').innerHTML = legend(daySeries);
+
+  // Филиалы из комментария
+  const byBr = {}; let noBr = 0;
+  anOrders.forEach(o => {
+    const bs = branchesFromText(o.comment);
+    if (!bs.length) { noBr++; return; }
+    bs.forEach(b => { (byBr[b] = byBr[b] || { n:0, sum:0 }); byBr[b].n++; byBr[b].sum += o.sum / bs.length; });
+  });
+  document.getElementById('chartBranch').innerHTML = barChart(
+    Object.entries(byBr).sort((a,b) => b[1].n - a[1].n).map(([k,v]) => ({ label:k, value:v.n, note:kFmt(Math.round(v.sum)), color:VIZ.s3 })),
+    { fmt: v => v + ' зак.' });
+  document.getElementById('anBrHint').textContent = noBr ? noBr + ' без филиала' : 'все с филиалом';
+
+  // Служба доставки
+  const byC = {};
+  anOrders.forEach(o => { const c = o.courier || '— не указан'; byC[c] = (byC[c] || 0) + 1; });
+  document.getElementById('chartCourier').innerHTML = barChart(
+    Object.entries(byC).sort((a,b) => b[1] - a[1]).map(([k,v]) => ({ label:k, value:v, color:VIZ.s1 })),
+    { fmt: v => v + ' зак.' });
+
+  // Даты для ретро-сверки
+  const sel = document.getElementById('anRetroDate');
+  const uch = [...new Set(anOrders.map(o => o.uchDate))].sort().reverse();
+  sel.innerHTML = uch.map(d => `<option value="${d}">${ruDate(d)}</option>`).join('');
+  renderRetro();
+}
+
+// Фамилия оператора коротко: «Байкенова Жания Муратбекқызы» → «Жания Б.»
+function shortName(full) {
+  const p = String(full).replace(/\/.*$/, '').trim().split(/\s+/);
+  if (p.length >= 2) return p[1] + ' ' + p[0][0] + '.';
+  return full;
+}
+
+// ── Ретро-сверка блюд ─────────────────────────────
+function renderRetro() {
+  const res = document.getElementById('anRetroResult');
+  const lists = document.getElementById('anRetroLists');
+  if (!res) return;
+  const day = document.getElementById('anRetroDate')?.value;
+  if (!anOrders.length || !day) { lists.innerHTML = ''; return; }
+  if (!anInvoices.length) {
+    res.style.color = 'var(--text3)';
+    res.innerHTML = 'Загрузите приходные накладные выше — тогда сверим блюда за выбранный день';
+    lists.innerHTML = ''; return;
+  }
+  const r = matchDishes(anOrders, anInvoices, day);
+  if (!r.invoices.length) {
+    res.style.color = 'var(--yellow)';
+    const dd = [...new Set(anInvoices.map(i => i.date))].sort().map(ruDate).join(', ');
+    res.innerHTML = `За ${ruDate(day)} накладных в файле нет — есть за ${dd}`;
+    lists.innerHTML = ''; return;
+  }
+  const bad = r.missing.length + r.extra.length + r.diff.length;
+  res.style.color = bad ? 'var(--text2)' : 'var(--green)';
+  res.innerHTML = bad
+    ? `Сошлось ${r.ok.length} позиций, расхождений ${bad} · накладных ${r.invoices.length}`
+    : `✅ Все ${r.ok.length} позиций сошлись · накладных ${r.invoices.length}`;
+  const save = document.getElementById('prihodLists');
+  renderPrihodLists(r, 'anRetroLists');
 }
 
 function renderMatchLists(r, shiftDate) {
@@ -2058,6 +2430,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initIikoUpload();
   goFromHash();
   initPrihodUpload();
+  initAnalyticsUpload();
   const url = ls('scriptUrl');
   if(url && url !== 'undefined'){ document.getElementById('scriptUrl').value=url; updateConnBadge(true); }
   else if(url === 'undefined'){ localStorage.removeItem('scriptUrl'); }
