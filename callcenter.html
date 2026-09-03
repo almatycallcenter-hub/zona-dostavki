@@ -818,6 +818,12 @@ details[open] > summary .chev { transform:rotate(90deg); }
           <div class="filter-pill" id="tp-day" onclick="setType('day',this)">только дневные</div>
         </div>
         <div id="anTypeHint" style="font-size:11.5px;color:var(--text3);margin-top:7px;"></div>
+        <div class="divider"></div>
+        <div class="txn-filters" style="align-items:center;">
+          <span style="font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.6px;margin-right:4px;">Категория</span>
+          <select class="fi" id="anCatSel" style="width:auto;min-width:190px;" onchange="setCatFilter(this.value)"></select>
+          <span id="anCatHint" style="font-size:11.5px;color:var(--text3);"></span>
+        </div>
       </div>
 
       <div class="g2">
@@ -854,18 +860,25 @@ details[open] > summary .chev { transform:rotate(90deg); }
       </div>
 
       <div class="card">
-        <div class="card-head"><div><div class="card-title">🗓 По дням недели</div>
-          <div style="font-size:11px;color:var(--text3);margin-top:2px;">в какие дни заказов больше</div></div></div>
+        <div class="card-head" style="flex-wrap:wrap;gap:8px;"><div><div class="card-title">🗓 По дням недели</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px;">в какие дни заказов больше</div></div>
+          <div class="txn-filters">
+            <div class="filter-pill active" id="dw-n" onclick="setDowMetric('n',this)">заказы</div>
+            <div class="filter-pill" id="dw-sum" onclick="setDowMetric('sum',this)">сумма</div>
+            <div class="filter-pill" id="dw-pickup" onclick="setDowMetric('pickup',this)">самовывоз</div>
+          </div></div>
         <div id="chartDow"></div>
       </div>
 
       <div class="g2">
         <div class="card">
-          <div class="card-head"><div class="card-title">🏬 Откуда заказы</div><span class="badge bb" id="anBrHint"></span></div>
+          <div class="card-head"><div><div class="card-title">🏬 Откуда заказы</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:2px;">нажмите — покажет категории, блюда и сами заказы</div></div><span class="badge bb" id="anBrHint"></span></div>
           <div id="chartBranch"></div>
         </div>
         <div class="card">
-          <div class="card-head"><div class="card-title">🛵 Служба доставки</div></div>
+          <div class="card-head"><div><div class="card-title">🛵 Служба доставки</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:2px;">нажмите — покажет категории, блюда и сами заказы</div></div></div>
           <div id="chartCourier"></div>
         </div>
       </div>
@@ -1869,6 +1882,8 @@ function renderPrihodLists(r, target) {
 // ══════════════════════════════════════════════════
 let anOrders = [], anInvoices = [], anCut = 'open';   // 'open' — дата принятия, 'uch' — учётный день
 let anType = 'all';                                   // 'all' | 'pre' — предзаказы | 'day' — дневные
+let anCat  = 'all';                                   // фильтр по категории блюд
+let anDowMetric = 'n';                                // что показывать в днях недели: n | sum | pickup
 
 const CAT_SET  = 'Чайные сеты';
 const CAT_CAKE = 'Торттар';
@@ -1881,6 +1896,12 @@ const VIZ = { s1:'#2a78d6', s2:'#eb6834', s3:'#1baf7a' };
 const anDate = o => (anCut === 'uch' ? o.uchDate : o.openDate);
 const isPre    = o => o.uchDate > o.openDate;              // предзаказ: доставка позже приёма
 const isPickup = o => /самовывоз/i.test(o.dtype || o.courier || '');
+const itemCat  = it => it.cat || '— без категории';
+const hasCat   = o => anCat === 'all' || (o.items || []).some(it => itemCat(it) === anCat && it.type !== 'Услуга');
+// При фильтре по категории считаем только её позиции, иначе — весь заказ
+const oSum = o => anCat === 'all' ? o.sum
+  : (o.items || []).filter(it => itemCat(it) === anCat && it.type !== 'Услуга')
+      .reduce((s, it) => s + (it.sum || 0), 0);
 
 const DOW_SHORT = ['вс','пн','вт','ср','чт','пт','сб'];
 const DOW_FULL  = ['понедельник','вторник','среда','четверг','пятница','суббота','воскресенье'];
@@ -1896,9 +1917,9 @@ function anInRange() {
   return anOrders.filter(o => {
     const d = anDate(o);
     if (!d || (f && d < f) || (t && d > t)) return false;
-    if (anType === 'pre') return isPre(o);
-    if (anType === 'day') return !isPre(o);
-    return true;
+    if (anType === 'pre' && !isPre(o)) return false;
+    if (anType === 'day' && isPre(o))  return false;
+    return hasCat(o);
   });
 }
 function anPreset(kind) {
@@ -1984,6 +2005,15 @@ function setCut(c, el) {
   renderAnalytics();
 }
 
+function setDowMetric(m, el) {
+  anDowMetric = m;
+  document.querySelectorAll('#dw-n,#dw-sum,#dw-pickup').forEach(p => p.classList.remove('active'));
+  el.classList.add('active');
+  renderAnalytics();
+}
+
+function setCatFilter(v) { anCat = v; renderAnalytics(); }
+
 function setType(t, el) {
   anType = t;
   document.querySelectorAll('#tp-all,#tp-pre,#tp-day').forEach(p => p.classList.remove('active'));
@@ -2048,6 +2078,21 @@ function renderAnalytics() {
   if (!anOrders.length) { box.style.display = 'none'; return; }
   box.style.display = '';
 
+  // Список категорий строим по всему отчёту, чтобы он не прыгал при фильтрации
+  const allCats = [...new Set(anOrders.flatMap(o => (o.items || [])
+    .filter(it => it.type !== 'Услуга' && !NOT_GOODS.test(it.dish)).map(itemCat)))].sort();
+  const csel = document.getElementById('anCatSel');
+  if (csel && csel.dataset.built !== String(allCats.length)) {
+    csel.dataset.built = String(allCats.length);
+    csel.innerHTML = '<option value="all">Все категории</option>' +
+      allCats.map(c => `<option value="${c}">${c}</option>`).join('');
+  }
+  if (csel && !allCats.includes(anCat) && anCat !== 'all') { anCat = 'all'; }
+  if (csel) csel.value = anCat;
+  const ch = document.getElementById('anCatHint');
+  if (ch) ch.textContent = anCat === 'all' ? '— считаются все позиции'
+      : '— в суммах и количествах только «' + anCat + '»';
+
   const rows = anInRange();
   document.getElementById('anBadge').textContent = rows.length + ' из ' + anOrders.length + ' заказов';
   document.getElementById('anBadge').className = 'badge ' + (rows.length ? 'bg' : 'by');
@@ -2061,10 +2106,10 @@ function renderAnalytics() {
   const dates  = [...new Set(rows.map(anDate))].sort();
   const rh = document.getElementById('anRangeHint');
   if (rh) rh.textContent = dates.length ? dayLabel(dates[0]) + ' — ' + dayLabel(dates[dates.length-1]) : '—';
-  const revenue = rows.reduce((s, o) => s + o.sum, 0);
+  const revenue = rows.reduce((s, o) => s + oSum(o), 0);
   const pickup  = rows.filter(isPickup).length;
   const pre     = rows.filter(isPre).length;
-  const preSum  = rows.filter(isPre).reduce((s, o) => s + o.sum, 0);
+  const preSum  = rows.filter(isPre).reduce((s, o) => s + oSum(o), 0);
 
   const th = document.getElementById('anTypeHint');
   if (th) th.textContent = anType === 'pre'
@@ -2091,10 +2136,10 @@ function renderAnalytics() {
   rows.forEach(o => {
     const n = shortName(o.oper || '— не указан');
     const e = byOper[n] = byOper[n] || { label:n, sum:0, n:0, pre:0, days:{} };
-    e.sum += o.sum; e.n++; if (isPre(o)) e.pre++;
+    e.sum += oSum(o); e.n++; if (isPre(o)) e.pre++;
     const d = anDate(o) || '—';
     const dd = e.days[d] = e.days[d] || { sum:0, n:0, pre:0 };
-    dd.sum += o.sum; dd.n++; if (isPre(o)) dd.pre++;
+    dd.sum += oSum(o); dd.n++; if (isPre(o)) dd.pre++;
   });
   const operRows = Object.values(byOper).sort((a,b) => b.sum - a.sum);
   const operMax = Math.max(1, ...operRows.map(r => r.sum));
@@ -2128,25 +2173,7 @@ function renderAnalytics() {
     const n = shortName(o.oper || '— не указан');
     const day = anDate(o) || '—', p = isPre(o);
     const e = byOper2[n] = byOper2[n] || { label:n, cats:{}, qty:0, modQty:0, sum:0 };
-    (o.items || []).forEach(it => {
-      const cat = it.cat || '— без категории';
-      if (it.type === 'Услуга' || NOT_GOODS.test(it.dish)) return;   // доставка — не товар
-      // Модификаторы оператор дописывает руками, суммы у них нет и они
-      // повторяют позиции заказа. Считаем отдельно, чтобы не задваивать.
-      const mod = it.type === 'Модификатор';
-      const q = it.qty || 0, m = it.sum || 0;
-      const add = (bag) => {
-        const c = bag[cat] = bag[cat] || { qty:0, modQty:0, sum:0, dishes:{} };
-        const d = c.dishes[it.dish] = c.dishes[it.dish] || { qty:0, sum:0, pre:0, mod:mod, days:{} };
-        if (mod) { c.modQty += q; d.mod = true; } else { c.qty += q; }
-        c.sum += m; d.qty += q; d.sum += m; if (p) d.pre += q;
-        const dd = d.days[day] = d.days[day] || { qty:0, sum:0, pre:0 };
-        dd.qty += q; dd.sum += m; if (p) dd.pre += q;
-      };
-      add(e.cats); add(periodCats);
-      if (mod) e.modQty += q; else e.qty += q;
-      e.sum += m;
-    });
+    collectItems([e.cats, periodCats], o, e);
   });
 
   document.getElementById('chartCats').innerHTML = catBlock(periodCats);
@@ -2168,7 +2195,7 @@ function renderAnalytics() {
     const e = byDay[d] = byDay[d] || { date:d, courier:0, pickup:0, pre:0, day:0, sum:0 };
     if (isPickup(o)) e.pickup++; else e.courier++;
     if (isPre(o)) e.pre++; else e.day++;
-    e.sum += o.sum;
+    e.sum += oSum(o);
   });
   const dayList = Object.values(byDay).sort((a,b) => a.date < b.date ? -1 : 1);
   const daySeries = [{ key:'courier', name:'Курьером', color:VIZ.s1 }, { key:'pickup', name:'Самовывоз', color:VIZ.s2 }];
@@ -2185,35 +2212,29 @@ function renderAnalytics() {
   rows.forEach(o => {
     const d = anDate(o); if (!d) return;
     const e = dow[dowIndex(d)];
-    e.n++; e.sum += o.sum; if (isPre(o)) e.pre++; if (isPickup(o)) e.pickup++;
+    e.n++; e.sum += oSum(o); if (isPre(o)) e.pre++; if (isPickup(o)) e.pickup++;
   });
-  const dowMax = Math.max(1, ...dow.map(d => d.n));
+  const dowVal = d => anDowMetric === 'sum' ? d.sum : anDowMetric === 'pickup' ? d.pickup : d.n;
+  const dowFmt = v => anDowMetric === 'sum' ? kFmt(v) : v + ' зак.';
+  const dowMax = Math.max(1, ...dow.map(dowVal));
   document.getElementById('chartDow').innerHTML = '<div class="viz">' + dow.map(d => `
-    <div class="viz-row" title="${DOW_FULL[d.i]}: ${d.n} заказов, ${kFmt(d.sum)}">
+    <div class="viz-row" title="${DOW_FULL[d.i]}: ${d.n} заказов, ${kFmt(d.sum)}, самовывоз ${d.pickup}">
       <div class="viz-name">${DOW_FULL[d.i]}</div>
-      <div class="viz-track"><div class="viz-bar" style="width:${Math.max(2, d.n/dowMax*100)}%;background:${VIZ.s1}"></div></div>
-      <div class="viz-num">${d.n} зак.</div>
+      <div class="viz-track"><div class="viz-bar" style="width:${Math.max(2, dowVal(d)/dowMax*100)}%;background:${VIZ.s1}"></div></div>
+      <div class="viz-num">${dowFmt(dowVal(d))}</div>
     </div>
-    <div class="dt-foot" style="padding:0 0 4px 114px;">${kFmt(d.sum)} · предзаказов ${d.pre} · самовывоз ${d.pickup}</div>`).join('') + '</div>';
+    <div class="dt-foot" style="padding:0 0 4px 114px;">${d.n} зак. · ${kFmt(d.sum)} · предзаказов ${d.pre} · самовывоз ${d.pickup}</div>`).join('') + '</div>';
 
   // ── Филиалы ──
-  const byBr = {}; let noBr = 0;
-  rows.forEach(o => {
-    const bs = branchesFromText(o.comment);
-    if (!bs.length) { noBr++; return; }
-    bs.forEach(b => { (byBr[b] = byBr[b] || { n:0, sum:0 }); byBr[b].n++; byBr[b].sum += o.sum / bs.length; });
-  });
-  document.getElementById('chartBranch').innerHTML = barChart(
-    Object.entries(byBr).sort((a,b) => b[1].n - a[1].n).map(([k,v]) => ({ label:k, value:v.n, note:kFmt(Math.round(v.sum)), color:VIZ.s3 })),
-    { fmt: v => v + ' зак.' });
+  let noBr = 0;
+  rows.forEach(o => { if (!branchesFromText(o.comment).length) noBr++; });
+  const byBr = buildGroups(rows, o => branchesFromText(o.comment));
+  document.getElementById('chartBranch').innerHTML = groupBlock(byBr, VIZ.s3);
   document.getElementById('anBrHint').textContent = noBr ? noBr + ' без филиала' : 'все с филиалом';
 
   // ── Службы доставки ──
-  const byC = {};
-  rows.forEach(o => { const c = o.courier || '— не указан'; byC[c] = (byC[c] || 0) + 1; });
-  document.getElementById('chartCourier').innerHTML = barChart(
-    Object.entries(byC).sort((a,b) => b[1] - a[1]).map(([k,v]) => ({ label:k, value:v, color:VIZ.s1 })),
-    { fmt: v => v + ' зак.' });
+  document.getElementById('chartCourier').innerHTML =
+    groupBlock(buildGroups(rows, o => [o.courier || '— не указан']), VIZ.s1);
 
   // ── Даты для ретро-сверки ──
   const sel = document.getElementById('anRetroDate');
@@ -2222,6 +2243,71 @@ function renderAnalytics() {
   sel.innerHTML = uch.map(d => `<option value="${d}">${dayLabel(d)}</option>`).join('');
   if (uch.includes(keep)) sel.value = keep;
   renderRetro();
+}
+
+// Раскладывает позиции заказа по категориям и блюдам сразу в несколько корзин.
+// Модификаторы оператор дописывает руками, суммы у них нет и они повторяют
+// позиции заказа — держим их отдельным счётчиком, чтобы не задваивать.
+function collectItems(bags, o, tot) {
+  const day = anDate(o) || '—', p = isPre(o);
+  (o.items || []).forEach(it => {
+    if (it.type === 'Услуга' || NOT_GOODS.test(it.dish)) return;   // доставка — не товар
+    const cat = itemCat(it);
+    if (anCat !== 'all' && cat !== anCat) return;
+    const mod = it.type === 'Модификатор';
+    const q = it.qty || 0, m = it.sum || 0;
+    bags.forEach(bag => {
+      const c = bag[cat] = bag[cat] || { qty:0, modQty:0, sum:0, dishes:{} };
+      const d = c.dishes[it.dish] = c.dishes[it.dish] || { qty:0, sum:0, pre:0, mod:mod, days:{} };
+      if (mod) { c.modQty += q; d.mod = true; } else { c.qty += q; }
+      c.sum += m; d.qty += q; d.sum += m; if (p) d.pre += q;
+      const dd = d.days[day] = d.days[day] || { qty:0, sum:0, pre:0 };
+      dd.qty += q; dd.sum += m; if (p) dd.pre += q;
+    });
+    if (tot) { if (mod) tot.modQty += q; else tot.qty += q; tot.sum += m; }
+  });
+}
+
+// Группировка заказов по признаку (служба доставки, филиал) с раскрытием
+// до категорий, блюд и самих заказов.
+function buildGroups(rows, keyFn) {
+  const g = {};
+  rows.forEach(o => {
+    const keys = keyFn(o);
+    if (!keys.length) return;
+    keys.forEach(k => {
+      const e = g[k] = g[k] || { label:k, n:0, sum:0, pre:0, cats:{}, orders:[] };
+      e.n++; e.sum += oSum(o) / keys.length; if (isPre(o)) e.pre++;
+      e.orders.push(o);
+      collectItems([e.cats], o);
+    });
+  });
+  return g;
+}
+
+function groupBlock(groups, color) {
+  const arr = Object.values(groups).sort((a,b) => b.n - a.n);
+  if (!arr.length) return '<div style="font-size:12px;color:var(--text3);padding:8px 0;">Нет данных</div>';
+  const max = Math.max(1, ...arr.map(g => g.n));
+  return arr.map(g => `
+    <details class="dt">
+      <summary>
+        <div class="viz-row">
+          <div class="viz-name"><span class="chev">▶</span> ${g.label}</div>
+          <div class="viz-track"><div class="viz-bar" style="width:${Math.max(2, g.n/max*100)}%;background:${color}"></div></div>
+          <div class="viz-num">${g.n} зак.</div>
+        </div>
+      </summary>
+      <div class="dt-body">
+        <div class="dt-foot">${kFmt(Math.round(g.sum))} · средний чек ${kFmt(Math.round(g.sum/g.n))} · предзаказов ${g.pre}</div>
+        ${catBlock(g.cats)}
+        <details class="dt dt-leaf">
+          <summary><div class="dt-dish"><span><span class="chev">▶</span> Заказы</span><span>${g.orders.length}</span></div></summary>
+          <div class="dt-days">${g.orders.slice().sort((a,b) => a.openDT < b.openDT ? -1 : 1).map(o => `
+            <div><span>№${o.num || '—'} · ${dayLabel(anDate(o))}${o.client ? ' · ' + o.client : ''}${isPre(o) ? ' · <i class="tag-pre">предзаказ</i>' : ''}</span><span>${kFmt(oSum(o))}</span></div>`).join('')}</div>
+        </details>
+      </div>
+    </details>`).join('');
 }
 
 // Количество: целое как есть, дробное с запятой (бауырсақ идёт килограммами)
