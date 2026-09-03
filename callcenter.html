@@ -286,6 +286,24 @@ body{font-family:var(--sans);letter-spacing:-.01em;background:var(--bg);color:va
 details[open] > summary .chev { transform:rotate(90deg); }
 @media(max-width:700px){ .dt-dish { padding-left:0; } }
 
+.presets { display:flex; gap:7px; flex-wrap:wrap; }
+@media(max-width:700px){
+  .presets { width:100%; }
+  .presets .btn { flex:1 1 46%; justify-content:center; padding:9px 10px; font-size:12.5px; }
+  #anFrom, #anTo { width:100% !important; }
+}
+.dt-leaf > summary { padding:0; }
+.dt-leaf .dt-dish { padding-top:3px; padding-bottom:3px; cursor:pointer; }
+.dt-leaf[open] .dt-dish { color:var(--text); }
+.dt-days { padding:2px 0 8px 128px; }
+.dt-days > div { display:flex; gap:10px; justify-content:space-between; font-size:11.5px; color:var(--text3); padding:2px 0; }
+.dt-days span:last-child { font-family:var(--mono); white-space:nowrap; }
+.dt-foot { font-size:11px; color:var(--text3); padding:6px 0 2px 114px; }
+.tag-mod, .tag-pre { font-style:normal; font-size:10px; border-radius:5px; padding:0 4px; white-space:nowrap; }
+.tag-mod { color:var(--text3); border:1px solid var(--border); }
+.tag-pre { color:var(--a2); background:var(--glow); }
+@media(max-width:700px){ .dt-days { padding-left:0; } .dt-foot { padding-left:0; } }
+
 /* ── G2 GRID ─────────────────────────── */
 .g2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
 @media(max-width:900px){ .g2 { grid-template-columns:1fr; } }
@@ -763,6 +781,21 @@ details[open] > summary .chev { transform:rotate(90deg); }
 
     <div id="anContent" style="display:none;">
 
+      <div class="card">
+        <div class="card-head"><div class="card-title">🗓 Период</div>
+          <span class="badge ba" id="anRangeHint"></span></div>
+        <div class="frow" style="margin-bottom:0;">
+          <div class="fg"><label class="fl">С</label><input class="fi" type="date" id="anFrom" style="width:170px;" onchange="renderAnalytics()"></div>
+          <div class="fg"><label class="fl">По</label><input class="fi" type="date" id="anTo" style="width:170px;" onchange="renderAnalytics()"></div>
+          <div class="presets">
+            <button class="btn btn-o btn-sm" onclick="anPreset('all')">Весь отчёт</button>
+            <button class="btn btn-o btn-sm" onclick="anPreset('month')">Текущий месяц</button>
+            <button class="btn btn-o btn-sm" onclick="anPreset('prev')">Прошлый месяц</button>
+            <button class="btn btn-o btn-sm" onclick="anPreset('week')">Последние 7 дней</button>
+          </div>
+        </div>
+      </div>
+
       <div class="kpi-row" id="anKpi"></div>
 
       <!-- фильтры одной строкой над графиками -->
@@ -795,10 +828,23 @@ details[open] > summary .chev { transform:rotate(90deg); }
         <div id="chartGoods"></div>
       </div>
 
+      <div class="g2">
+        <div class="card">
+          <div class="card-head"><div class="card-title">📅 Заказы по дням</div>
+            <div class="viz-legend" id="legendDays"></div></div>
+          <div id="chartDays"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><div class="card-title">⏳ Предзаказы по дням</div>
+            <div class="viz-legend" id="legendPre"></div></div>
+          <div id="chartPre"></div>
+        </div>
+      </div>
+
       <div class="card">
-        <div class="card-head"><div class="card-title">📅 Заказы по дням</div>
-          <div class="viz-legend" id="legendDays"></div></div>
-        <div id="chartDays"></div>
+        <div class="card-head"><div><div class="card-title">🗓 По дням недели</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px;">в какие дни заказов больше</div></div></div>
+        <div id="chartDow"></div>
       </div>
 
       <div class="g2">
@@ -1820,6 +1866,45 @@ const CAT_CAKE = 'Торттар';
 const VIZ = { s1:'#2a78d6', s2:'#eb6834', s3:'#1baf7a' };
 
 const anDate = o => (anCut === 'uch' ? o.uchDate : o.openDate);
+const isPre    = o => o.uchDate > o.openDate;              // предзаказ: доставка позже приёма
+const isPickup = o => /самовывоз/i.test(o.dtype || o.courier || '');
+
+const DOW_SHORT = ['вс','пн','вт','ср','чт','пт','сб'];
+const DOW_FULL  = ['понедельник','вторник','среда','четверг','пятница','суббота','воскресенье'];
+// индекс в DOW_FULL: 0 — понедельник
+const dowIndex = d => (new Date(d + 'T12:00:00Z').getUTCDay() + 6) % 7;
+const dayOfWeek = d => DOW_SHORT[new Date(d + 'T12:00:00Z').getUTCDay()];
+const dayLabel  = d => (d && d !== '—') ? ruDate(d) + ', ' + dayOfWeek(d) : '—';
+
+// Период: пусто — берём всё, что есть в отчёте
+function anInRange() {
+  const f = document.getElementById('anFrom')?.value || '';
+  const t = document.getElementById('anTo')?.value || '';
+  return anOrders.filter(o => {
+    const d = anDate(o);
+    return d && (!f || d >= f) && (!t || d <= t);
+  });
+}
+function anPreset(kind) {
+  const all = anOrders.map(anDate).filter(Boolean).sort();
+  if (!all.length) return;
+  const from = document.getElementById('anFrom'), to = document.getElementById('anTo');
+  const last = all[all.length - 1], p = x => String(x).padStart(2,'0');
+  const ymd = dt => dt.getFullYear() + '-' + p(dt.getMonth()+1) + '-' + p(dt.getDate());
+  if (kind === 'all')   { from.value = ''; to.value = ''; }
+  if (kind === 'month') { from.value = last.slice(0,8) + '01'; to.value = last; }
+  if (kind === 'prev')  {
+    const d = new Date(last + 'T12:00:00Z');
+    const s0 = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth()-1, 1));
+    const e0 = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 0));
+    from.value = ymd(s0); to.value = ymd(e0);
+  }
+  if (kind === 'week')  {
+    const d = new Date(last + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - 6);
+    from.value = ymd(d); to.value = last;
+  }
+  renderAnalytics();
+}
 const short  = n => n >= 1e6 ? (n/1e6).toFixed(1).replace('.',',')+' млн'
                 : n >= 1e3 ? Math.round(n/1e3)+' тыс' : String(Math.round(n));
 
@@ -1921,8 +2006,8 @@ function stackChart(days, series) {
   return '<div class="viz">' + days.map(d => {
     const tot = series.reduce((s, x) => s + (d[x.key] || 0), 0);
     return `
-    <div class="viz-row" title="${ruDate(d.date)}: ${series.map(s => s.name + ' ' + (d[s.key]||0)).join(' · ')}">
-      <div class="viz-name">${ruDate(d.date)}</div>
+    <div class="viz-row" title="${dayLabel(d.date)}: ${series.map(s => s.name + ' ' + (d[s.key]||0)).join(' · ')}">
+      <div class="viz-name">${dayLabel(d.date)}</div>
       <div class="viz-track" style="display:flex;gap:2px;">
         ${series.map(s => (d[s.key] ? `<div class="viz-bar" style="width:${d[s.key]/max*100}%;background:${s.color}"></div>` : '')).join('')}
       </div>
@@ -1939,12 +2024,24 @@ function renderAnalytics() {
   if (!box) return;
   if (!anOrders.length) { box.style.display = 'none'; return; }
   box.style.display = '';
-  document.getElementById('anBadge').textContent = anOrders.length + ' заказов';
-  document.getElementById('anBadge').className = 'badge bg';
 
-  const dates = [...new Set(anOrders.map(anDate))].sort();
-  const revenue = anOrders.reduce((s, o) => s + o.sum, 0);
-  const pickup  = anOrders.filter(o => /самовывоз/i.test(o.dtype || o.courier)).length;
+  const rows = anInRange();
+  document.getElementById('anBadge').textContent = rows.length + ' из ' + anOrders.length + ' заказов';
+  document.getElementById('anBadge').className = 'badge ' + (rows.length ? 'bg' : 'by');
+  if (!rows.length) {
+    document.getElementById('anKpi').innerHTML = '<div class="kpi"><div class="kpi-label">Пусто</div><div class="kpi-val">—</div><div class="kpi-sub">в выбранном периоде нет заказов</div></div>';
+    ['chartOper','chartCats','chartGoods','chartDays','chartDow','chartPre','chartBranch','chartCourier']
+      .forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ''; });
+    return;
+  }
+
+  const dates  = [...new Set(rows.map(anDate))].sort();
+  const rh = document.getElementById('anRangeHint');
+  if (rh) rh.textContent = dates.length ? dayLabel(dates[0]) + ' — ' + dayLabel(dates[dates.length-1]) : '—';
+  const revenue = rows.reduce((s, o) => s + o.sum, 0);
+  const pickup  = rows.filter(isPickup).length;
+  const pre     = rows.filter(isPre).length;
+  const preSum  = rows.filter(isPre).reduce((s, o) => s + o.sum, 0);
 
   document.getElementById('anCutHint').textContent = anCut === 'uch'
     ? '— заказ засчитан в день доставки'
@@ -1952,26 +2049,27 @@ function renderAnalytics() {
 
   document.getElementById('anKpi').innerHTML = [
     ['Выручка', kFmt(revenue), dates.length + ' дней'],
-    ['Заказов', String(anOrders.length), (anOrders.length / (dates.length||1)).toFixed(1) + ' в день'],
-    ['Средний чек', kFmt(Math.round(revenue / anOrders.length)), ''],
-    ['Самовывоз', pickup + ' шт', Math.round(pickup / anOrders.length * 100) + '% заказов']
+    ['Заказов', String(rows.length), (rows.length / (dates.length||1)).toFixed(1) + ' в день'],
+    ['Средний чек', kFmt(Math.round(revenue / rows.length)), ''],
+    ['Предзаказы', pre + ' шт', Math.round(pre / rows.length * 100) + '% · ' + kFmt(preSum)],
+    ['Самовывоз', pickup + ' шт', Math.round(pickup / rows.length * 100) + '% заказов']
   ].map(([l, v, s]) => `<div class="kpi"><div class="kpi-label">${l}</div><div class="kpi-val">${v}</div><div class="kpi-sub">${s}</div></div>`).join('');
 
-  // Выручка по операторам, с раскрытием по дням выбранного разреза
+  // ── Выручка по операторам, с раскрытием по дням ──
   const byOper = {};
-  anOrders.forEach(o => {
+  rows.forEach(o => {
     const n = shortName(o.oper || '— не указан');
-    const e = byOper[n] = byOper[n] || { label:n, sum:0, n:0, days:{} };
-    e.sum += o.sum; e.n++;
+    const e = byOper[n] = byOper[n] || { label:n, sum:0, n:0, pre:0, days:{} };
+    e.sum += o.sum; e.n++; if (isPre(o)) e.pre++;
     const d = anDate(o) || '—';
-    const dd = e.days[d] = e.days[d] || { sum:0, n:0 };
-    dd.sum += o.sum; dd.n++;
+    const dd = e.days[d] = e.days[d] || { sum:0, n:0, pre:0 };
+    dd.sum += o.sum; dd.n++; if (isPre(o)) dd.pre++;
   });
   const operRows = Object.values(byOper).sort((a,b) => b.sum - a.sum);
   const operMax = Math.max(1, ...operRows.map(r => r.sum));
   document.getElementById('chartOper').innerHTML = operRows.map((r, i) => {
-    const days = Object.entries(r.days).sort((a,b) => a[0] < b[0] ? -1 : 1);
-    const dMax = Math.max(1, ...days.map(d => d[1].sum));
+    const ds = Object.entries(r.days).sort((a,b) => a[0] < b[0] ? -1 : 1);
+    const dMax = Math.max(1, ...ds.map(d => d[1].sum));
     return `
     <details class="dt"${i === 0 ? ' open' : ''}>
       <summary>
@@ -1982,21 +2080,22 @@ function renderAnalytics() {
         </div>
       </summary>
       <div class="dt-body">
-        ${days.map(([d, v]) => `
+        ${ds.map(([d, v]) => `
           <div class="viz-row">
-            <div class="viz-sub">${ruDate(d)}</div>
+            <div class="viz-sub">${dayLabel(d)}</div>
             <div class="viz-track" style="height:9px;"><div class="viz-bar" style="width:${Math.max(2, v.sum/dMax*100)}%;background:${VIZ.s3}"></div></div>
             <div class="viz-num" style="font-weight:500;">${kFmt(v.sum)}</div>
           </div>`).join('')}
-        <div style="font-size:11px;color:var(--text3);padding:6px 0 2px 114px;">${r.n} заказов · средний чек ${kFmt(Math.round(r.sum / r.n))}</div>
+        <div class="dt-foot">${r.n} заказов · ${r.pre} предзаказов · средний чек ${kFmt(Math.round(r.sum / r.n))}</div>
       </div>
-    </details>`; }).join('') || '<div style="font-size:12px;color:var(--text3);">Нет данных</div>';
+    </details>`; }).join('');
   document.getElementById('anOpTotal').textContent = operRows.length + ' операторов';
 
-  // Категории за период и продажи по операторам — со всеми категориями отчёта
+  // ── Категории и продажи по операторам ──
   const periodCats = {}, byOper2 = {};
-  anOrders.forEach(o => {
+  rows.forEach(o => {
     const n = shortName(o.oper || '— не указан');
+    const day = anDate(o) || '—', p = isPre(o);
     const e = byOper2[n] = byOper2[n] || { label:n, cats:{}, qty:0, sum:0 };
     (o.items || []).forEach(it => {
       const cat = it.cat || '— без категории';
@@ -2007,9 +2106,11 @@ function renderAnalytics() {
       const q = it.qty || 0, m = it.sum || 0;
       const add = (bag) => {
         const c = bag[cat] = bag[cat] || { qty:0, modQty:0, sum:0, dishes:{} };
-        const d = c.dishes[it.dish] = c.dishes[it.dish] || { qty:0, sum:0, mod:mod };
+        const d = c.dishes[it.dish] = c.dishes[it.dish] || { qty:0, sum:0, pre:0, mod:mod, days:{} };
         if (mod) { c.modQty += q; d.mod = true; } else { c.qty += q; }
-        c.sum += m; d.qty += q; d.sum += m;
+        c.sum += m; d.qty += q; d.sum += m; if (p) d.pre += q;
+        const dd = d.days[day] = d.days[day] || { qty:0, sum:0, pre:0 };
+        dd.qty += q; dd.sum += m; if (p) dd.pre += q;
       };
       add(e.cats); add(periodCats);
       if (!mod) e.qty += q;
@@ -2029,20 +2130,44 @@ function renderAnalytics() {
     </details>`).join('') || '<div style="font-size:12px;color:var(--text3);">Нет данных</div>';
   document.getElementById('anGoodsHint').textContent = opers.length + ' операторов';
 
-  // Заказы по дням: курьером против самовывоза
+  // ── Заказы по дням: курьером против самовывоза ──
   const byDay = {};
-  anOrders.forEach(o => {
+  rows.forEach(o => {
     const d = anDate(o); if (!d) return;
-    const e = byDay[d] = byDay[d] || { date:d, courier:0, pickup:0 };
-    if (/самовывоз/i.test(o.dtype || o.courier)) e.pickup++; else e.courier++;
+    const e = byDay[d] = byDay[d] || { date:d, courier:0, pickup:0, pre:0, day:0, sum:0 };
+    if (isPickup(o)) e.pickup++; else e.courier++;
+    if (isPre(o)) e.pre++; else e.day++;
+    e.sum += o.sum;
   });
+  const dayList = Object.values(byDay).sort((a,b) => a.date < b.date ? -1 : 1);
   const daySeries = [{ key:'courier', name:'Курьером', color:VIZ.s1 }, { key:'pickup', name:'Самовывоз', color:VIZ.s2 }];
-  document.getElementById('chartDays').innerHTML = stackChart(Object.values(byDay).sort((a,b) => a.date < b.date ? -1 : 1), daySeries);
+  document.getElementById('chartDays').innerHTML = stackChart(dayList, daySeries);
   document.getElementById('legendDays').innerHTML = legend(daySeries);
 
-  // Филиалы из комментария
+  // ── Предзаказы против дневных, по дням ──
+  const preSeries = [{ key:'pre', name:'Предзаказ', color:VIZ.s3 }, { key:'day', name:'Дневной', color:VIZ.s1 }];
+  document.getElementById('chartPre').innerHTML = stackChart(dayList, preSeries);
+  document.getElementById('legendPre').innerHTML = legend(preSeries);
+
+  // ── По дням недели ──
+  const dow = Array.from({length:7}, (_, i) => ({ i, n:0, sum:0, pre:0, pickup:0 }));
+  rows.forEach(o => {
+    const d = anDate(o); if (!d) return;
+    const e = dow[dowIndex(d)];
+    e.n++; e.sum += o.sum; if (isPre(o)) e.pre++; if (isPickup(o)) e.pickup++;
+  });
+  const dowMax = Math.max(1, ...dow.map(d => d.n));
+  document.getElementById('chartDow').innerHTML = '<div class="viz">' + dow.map(d => `
+    <div class="viz-row" title="${DOW_FULL[d.i]}: ${d.n} заказов, ${kFmt(d.sum)}">
+      <div class="viz-name">${DOW_FULL[d.i]}</div>
+      <div class="viz-track"><div class="viz-bar" style="width:${Math.max(2, d.n/dowMax*100)}%;background:${VIZ.s1}"></div></div>
+      <div class="viz-num">${d.n} зак.</div>
+    </div>
+    <div class="dt-foot" style="padding:0 0 4px 114px;">${kFmt(d.sum)} · предзаказов ${d.pre} · самовывоз ${d.pickup}</div>`).join('') + '</div>';
+
+  // ── Филиалы ──
   const byBr = {}; let noBr = 0;
-  anOrders.forEach(o => {
+  rows.forEach(o => {
     const bs = branchesFromText(o.comment);
     if (!bs.length) { noBr++; return; }
     bs.forEach(b => { (byBr[b] = byBr[b] || { n:0, sum:0 }); byBr[b].n++; byBr[b].sum += o.sum / bs.length; });
@@ -2052,17 +2177,19 @@ function renderAnalytics() {
     { fmt: v => v + ' зак.' });
   document.getElementById('anBrHint').textContent = noBr ? noBr + ' без филиала' : 'все с филиалом';
 
-  // Служба доставки
+  // ── Службы доставки ──
   const byC = {};
-  anOrders.forEach(o => { const c = o.courier || '— не указан'; byC[c] = (byC[c] || 0) + 1; });
+  rows.forEach(o => { const c = o.courier || '— не указан'; byC[c] = (byC[c] || 0) + 1; });
   document.getElementById('chartCourier').innerHTML = barChart(
     Object.entries(byC).sort((a,b) => b[1] - a[1]).map(([k,v]) => ({ label:k, value:v, color:VIZ.s1 })),
     { fmt: v => v + ' зак.' });
 
-  // Даты для ретро-сверки
+  // ── Даты для ретро-сверки ──
   const sel = document.getElementById('anRetroDate');
   const uch = [...new Set(anOrders.map(o => o.uchDate))].sort().reverse();
-  sel.innerHTML = uch.map(d => `<option value="${d}">${ruDate(d)}</option>`).join('');
+  const keep = sel.value;
+  sel.innerHTML = uch.map(d => `<option value="${d}">${dayLabel(d)}</option>`).join('');
+  if (uch.includes(keep)) sel.value = keep;
   renderRetro();
 }
 
@@ -2087,7 +2214,17 @@ function catBlock(cats) {
         </div>
       </summary>
       <div class="dt-body">
-        ${dishes.map(([d, v]) => `<div class="dt-dish"><span>${d}${v.mod ? ' <i style="font-style:normal;font-size:10px;color:var(--text3);border:1px solid var(--border);border-radius:5px;padding:0 4px;">мод.</i>' : ''}</span><span>${qFmt(v.qty)}${v.sum ? ' · ' + kFmt(Math.round(v.sum)) : ''}</span></div>`).join('')}
+        ${dishes.map(([d, v]) => {
+          const ds = Object.entries(v.days || {}).sort((a,b) => a[0] < b[0] ? -1 : 1);
+          return `
+          <details class="dt dt-leaf">
+            <summary><div class="dt-dish">
+              <span><span class="chev">▶</span> ${d}${v.mod ? ' <i class="tag-mod">мод.</i>' : ''}${v.pre ? ' <i class="tag-pre">предзаказ ' + qFmt(v.pre) + '</i>' : ''}</span>
+              <span>${qFmt(v.qty)}${v.sum ? ' · ' + kFmt(Math.round(v.sum)) : ''}</span>
+            </div></summary>
+            <div class="dt-days">${ds.map(([dd, dv]) => `
+              <div><span>${dayLabel(dd)}</span><span>${qFmt(dv.qty)} шт${dv.sum ? ' · ' + kFmt(Math.round(dv.sum)) : ''}${dv.pre ? ' · предзаказ ' + qFmt(dv.pre) : ''}</span></div>`).join('')}</div>
+          </details>`; }).join('')}
       </div>
     </details>`;
   }).join('');
