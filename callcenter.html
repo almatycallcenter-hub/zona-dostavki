@@ -292,6 +292,10 @@ details[open] > summary .chev { transform:rotate(90deg); }
   .presets .btn { flex:1 1 46%; justify-content:center; padding:9px 10px; font-size:12.5px; }
   #anFrom, #anTo { width:100% !important; }
 }
+.dt-split { display:flex; gap:8px; align-items:baseline; flex-wrap:wrap;
+  font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.7px;
+  color:var(--text3); margin:10px 0 5px 0; padding-top:8px; border-top:1px dashed var(--border); }
+.dt-split span { font-weight:400; text-transform:none; letter-spacing:0; font-size:11px; }
 .dt-leaf > summary { padding:0; }
 .dt-leaf .dt-dish { padding-top:3px; padding-bottom:3px; cursor:pointer; }
 .dt-leaf[open] .dt-dish { color:var(--text); }
@@ -806,6 +810,14 @@ details[open] > summary .chev { transform:rotate(90deg); }
           <div class="filter-pill" id="cut-uch" onclick="setCut('uch',this)">учётному дню</div>
         </div>
         <div id="anCutHint" style="font-size:11.5px;color:var(--text3);margin-top:7px;"></div>
+        <div class="divider"></div>
+        <div class="txn-filters" style="align-items:center;">
+          <span style="font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.6px;margin-right:4px;">Тип заказа</span>
+          <div class="filter-pill active" id="tp-all" onclick="setType('all',this)">все</div>
+          <div class="filter-pill" id="tp-pre" onclick="setType('pre',this)">только предзаказы</div>
+          <div class="filter-pill" id="tp-day" onclick="setType('day',this)">только дневные</div>
+        </div>
+        <div id="anTypeHint" style="font-size:11.5px;color:var(--text3);margin-top:7px;"></div>
       </div>
 
       <div class="g2">
@@ -1856,6 +1868,7 @@ function renderPrihodLists(r, target) {
 //  филиалы, службы доставки, ретро-сверка с приходом.
 // ══════════════════════════════════════════════════
 let anOrders = [], anInvoices = [], anCut = 'open';   // 'open' — дата принятия, 'uch' — учётный день
+let anType = 'all';                                   // 'all' | 'pre' — предзаказы | 'day' — дневные
 
 const CAT_SET  = 'Чайные сеты';
 const CAT_CAKE = 'Торттар';
@@ -1882,7 +1895,10 @@ function anInRange() {
   const t = document.getElementById('anTo')?.value || '';
   return anOrders.filter(o => {
     const d = anDate(o);
-    return d && (!f || d >= f) && (!t || d <= t);
+    if (!d || (f && d < f) || (t && d > t)) return false;
+    if (anType === 'pre') return isPre(o);
+    if (anType === 'day') return !isPre(o);
+    return true;
   });
 }
 function anPreset(kind) {
@@ -1968,6 +1984,13 @@ function setCut(c, el) {
   renderAnalytics();
 }
 
+function setType(t, el) {
+  anType = t;
+  document.querySelectorAll('#tp-all,#tp-pre,#tp-day').forEach(p => p.classList.remove('active'));
+  el.classList.add('active');
+  renderAnalytics();
+}
+
 // ── Рисование полос ───────────────────────────────
 // Горизонтальные полосы: подпись значением у каждой (обязательна,
 // потому что цвет не должен быть единственным носителем смысла).
@@ -2043,6 +2066,12 @@ function renderAnalytics() {
   const pre     = rows.filter(isPre).length;
   const preSum  = rows.filter(isPre).reduce((s, o) => s + o.sum, 0);
 
+  const th = document.getElementById('anTypeHint');
+  if (th) th.textContent = anType === 'pre'
+      ? '— в расчёт идут только заказы, принятые заранее: доставка позже дня приёма'
+      : anType === 'day'
+      ? '— в расчёт идут только заказы, принятые и доставленные в один день'
+      : '— считаются все заказы периода';
   document.getElementById('anCutHint').textContent = anCut === 'uch'
     ? '— заказ засчитан в день доставки'
     : '— заказ засчитан в день, когда его приняли';
@@ -2051,7 +2080,9 @@ function renderAnalytics() {
     ['Выручка', kFmt(revenue), dates.length + ' дней'],
     ['Заказов', String(rows.length), (rows.length / (dates.length||1)).toFixed(1) + ' в день'],
     ['Средний чек', kFmt(Math.round(revenue / rows.length)), ''],
-    ['Предзаказы', pre + ' шт', Math.round(pre / rows.length * 100) + '% · ' + kFmt(preSum)],
+    anType === 'all'
+      ? ['Предзаказы', pre + ' шт', Math.round(pre / rows.length * 100) + '% · ' + kFmt(preSum)]
+      : ['Отобрано', rows.length + ' из ' + anOrders.length, anType === 'pre' ? 'только предзаказы' : 'только дневные'],
     ['Самовывоз', pickup + ' шт', Math.round(pickup / rows.length * 100) + '% заказов']
   ].map(([l, v, s]) => `<div class="kpi"><div class="kpi-label">${l}</div><div class="kpi-val">${v}</div><div class="kpi-sub">${s}</div></div>`).join('');
 
@@ -2096,7 +2127,7 @@ function renderAnalytics() {
   rows.forEach(o => {
     const n = shortName(o.oper || '— не указан');
     const day = anDate(o) || '—', p = isPre(o);
-    const e = byOper2[n] = byOper2[n] || { label:n, cats:{}, qty:0, sum:0 };
+    const e = byOper2[n] = byOper2[n] || { label:n, cats:{}, qty:0, modQty:0, sum:0 };
     (o.items || []).forEach(it => {
       const cat = it.cat || '— без категории';
       if (it.type === 'Услуга' || NOT_GOODS.test(it.dish)) return;   // доставка — не товар
@@ -2113,7 +2144,7 @@ function renderAnalytics() {
         dd.qty += q; dd.sum += m; if (p) dd.pre += q;
       };
       add(e.cats); add(periodCats);
-      if (!mod) e.qty += q;
+      if (mod) e.modQty += q; else e.qty += q;
       e.sum += m;
     });
   });
@@ -2125,7 +2156,7 @@ function renderAnalytics() {
   document.getElementById('chartGoods').innerHTML = opers.map((e, i) => `
     <details class="dt dt-oper"${i === 0 ? ' open' : ''}>
       <summary><div class="dt-head"><span class="chev">▶</span><b>${e.label}</b>
-        <span class="dt-tot">${qFmt(e.qty)} шт · ${kFmt(Math.round(e.sum))}</span></div></summary>
+        <span class="dt-tot">${qFmt(e.qty)} шт${e.modQty ? ' + ' + qFmt(e.modQty) + ' мод.' : ''} · ${kFmt(Math.round(e.sum))}</span></div></summary>
       <div class="dt-body">${catBlock(e.cats)}</div>
     </details>`).join('') || '<div style="font-size:12px;color:var(--text3);">Нет данных</div>';
   document.getElementById('anGoodsHint').textContent = opers.length + ' операторов';
@@ -2214,7 +2245,18 @@ function catBlock(cats) {
         </div>
       </summary>
       <div class="dt-body">
-        ${dishes.map(([d, v]) => {
+        ${dishBlock(dishes.filter(x => !x[1].mod))}
+        ${(() => { const m = dishes.filter(x => x[1].mod); return m.length ? `
+          <div class="dt-split">Модификаторы <span>${qFmt(c.modQty)} шт · выписаны вручную, в счёт не идут</span></div>
+          ${dishBlock(m)}` : ''; })()}
+      </div>
+    </details>`;
+  }).join('');
+}
+
+// Список блюд внутри категории, каждое раскрывается по датам продаж
+function dishBlock(dishes) {
+  return dishes.map(([d, v]) => {
           const ds = Object.entries(v.days || {}).sort((a,b) => a[0] < b[0] ? -1 : 1);
           return `
           <details class="dt dt-leaf">
@@ -2224,10 +2266,7 @@ function catBlock(cats) {
             </div></summary>
             <div class="dt-days">${ds.map(([dd, dv]) => `
               <div><span>${dayLabel(dd)}</span><span>${qFmt(dv.qty)} шт${dv.sum ? ' · ' + kFmt(Math.round(dv.sum)) : ''}${dv.pre ? ' · предзаказ ' + qFmt(dv.pre) : ''}</span></div>`).join('')}</div>
-          </details>`; }).join('')}
-      </div>
-    </details>`;
-  }).join('');
+          </details>`; }).join('');
 }
 
 // Фамилия оператора коротко: «Байкенова Жания Муратбекқызы» → «Жания Б.»
