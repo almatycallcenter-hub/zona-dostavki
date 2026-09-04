@@ -2273,6 +2273,27 @@ function renderWolt() {
     if (cand.length === 1) { taken.add(cand[0].o); p.o = cand[0].o; p.via = 'имени'; }
   });
 
+  // Проход 4 — по филиалу отправки и сумме за доставку. Работает там, где имя,
+  // телефон и адрес не совпадают вовсе: корпоративные заказы оформляют на одно
+  // лицо, а везут в компанию. Берём только если сошлись оба признака сразу.
+  pairs.forEach(p => {
+    if (p.o) return;
+    const br = isOurs(p.w.fromAddr);
+    const cand = anOrders.filter(o => !taken.has(o) && isWoltOrder(o)).map(o => {
+      const gap = Math.abs(ots(o) - wts(p.w));
+      if (gap > 864e5) return null;                       // не дальше суток
+      const paid = delivPaid(o);
+      const brOk = !!br && branchesFromText(o.comment).includes(br);
+      // Оператор округляет: 2 400 при тарифе 2 356 — это та же доставка
+      const feeOk = paid > 0 && Math.abs(paid - p.w.fee) <= Math.max(500, p.w.fee * 0.2);
+      if (!brOk || !feeOk) return null;
+      return { o, gap, score: 6 - gap / 864e5 };
+    }).filter(Boolean).sort((a,b) => b.score - a.score);
+    if (cand.length && (!cand[1] || cand[1].score < cand[0].score - 0.05)) {
+      taken.add(cand[0].o); p.o = cand[0].o; p.via = 'филиалу и сумме';
+    }
+  });
+
   // Что не нашлось — покажем ближайших кандидатов, чтобы было видно почему
   pairs.forEach(p => {
     if (p.o) return;
@@ -2282,9 +2303,14 @@ function renderWolt() {
         const gap = Math.abs(ots(o) - wts(p.w));
         const m = addrMatch(wa, addrKey(o.addr));
         const nameEq = lat(o.client) && lat(o.client) === lat(p.w.client);
-        return { o, gap, m, nameEq, score: (m ? m * 10 : 0) + (nameEq ? 8 : 0) - gap / 864e5 };
+        const br = isOurs(p.w.fromAddr);
+        const brOk = !!br && branchesFromText(o.comment).includes(br);
+        const paid = delivPaid(o);
+        const feeOk = paid > 0 && Math.abs(paid - p.w.fee) <= Math.max(500, p.w.fee * 0.2);
+        return { o, gap, m, nameEq, brOk, feeOk,
+                 score: (m ? m * 10 : 0) + (nameEq ? 8 : 0) + (brOk ? 4 : 0) + (feeOk ? 4 : 0) - gap / 864e5 };
       })
-      .filter(c => (c.m || c.nameEq) && c.gap <= 3 * 864e5)
+      .filter(c => (c.m || c.nameEq || (c.brOk && c.feeOk)) && c.gap <= 3 * 864e5)
       .sort((a,b) => b.score - a.score).slice(0, 2);
   });
 
@@ -2359,7 +2385,8 @@ function renderWolt() {
                 : '<span style="color:var(--yellow);">заказ не найден</span>' +
                   ((p.near || []).length ? `<div style="font-size:10.5px;color:var(--text3);">похоже на ${
                     p.near.map(c => `№${c.o.num} <span style="color:var(--text3);">(${
-                      [c.m === 2 ? 'адрес' : c.m === 1 ? 'улица' : '', c.nameEq ? 'имя' : ''].filter(Boolean).join(' + ')
+                      [c.m === 2 ? 'адрес' : c.m === 1 ? 'улица' : '', c.nameEq ? 'имя' : '',
+                       c.brOk ? 'филиал' : '', c.feeOk ? 'сумма доставки' : ''].filter(Boolean).join(' + ')
                     })</span>`).join(', ')}</div>` : '')}</td>
     </tr>`;
   };
