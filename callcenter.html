@@ -1232,6 +1232,9 @@ function parseIikoAoa(aoa) {
   const cUch  = C('учетный день') >= 0 ? C('учетный день') : C('учётный день');
   const cOper = C('оператор доставки'), cNum = C('номер доставки'), cCourier = C('курьер');
   const cClient = C('фио клиента'), cPhone = C('телефон клиента');
+  // В 0080 два телефона: клиента и доставки. У части заказов заполнен только
+  // второй — тот, что видит курьер, и именно он попадает в Wolt.
+  const cPhoneD = C('телефон доставки');
   const cComment = C('комментарий к доставке'), cAddr = C('адрес'), cDish = C('блюдо');
   const cCat = C('категория блюда'), cQty = C('количество блюд'), cDType = C('тип доставки');
   const cIType = C('тип товара');
@@ -1256,6 +1259,7 @@ function parseIikoAoa(aoa) {
           dtype: String((cDType>=0?row[cDType]:'')||'').trim(),
           client: String((cClient>=0?row[cClient]:'')||'').trim(),
           phone: String((cPhone>=0?row[cPhone]:'')||'').trim(),
+          phoneD: String((cPhoneD>=0?row[cPhoneD]:'')||'').trim(),
           comment: String((cComment>=0?row[cComment]:'')||'').trim(),
           addr: String((cAddr>=0?row[cAddr]:'')||'').trim(),
           sum: 0, items: []
@@ -2054,9 +2058,22 @@ const phKey = s => String(s || '').replace(/\D/g, '').slice(-10);
 const wAt = (d, t, base) => (d && d !== base ? ruDate(d) + ' ' : '') + t;
 // Адреса пишут по-разному: «ул. улица Сатпаева д. 105» и «улица Сатпаева 105,
 // 050000, Алматы» — это одно и то же. Сводим к названию улицы и номеру дома.
+// Латиница и кириллица в адресах смешаны: «Chernomorskaya Street» в Wolt и
+// «ул. Черноморская улица д. 11» в iiko — одно и то же. Сводим обе записи к
+// латинскому скелету, тогда они совпадают буква в букву.
+const CYR2LAT = { 'а':'a','ә':'a','б':'b','в':'v','г':'g','ғ':'g','д':'d','е':'e','ё':'e',
+  'ж':'zh','з':'z','и':'i','й':'i','і':'i','к':'k','қ':'k','л':'l','м':'m','н':'n','ң':'n',
+  'о':'o','ө':'o','п':'p','р':'r','с':'s','т':'t','у':'u','ұ':'u','ү':'u','ф':'f','х':'h',
+  'һ':'h','ц':'c','ч':'ch','ш':'sh','щ':'sh','ъ':'','ы':'y','ь':'','э':'e','ю':'yu','я':'ya' };
+function lat(w) {
+  let out = '';
+  for (const ch of String(w || '').toLowerCase()) out += (ch in CYR2LAT ? CYR2LAT[ch] : ch);
+  return out.replace(/kh/g, 'h').replace(/[^a-z0-9]/g, '');
+}
+
 const ADDR_STOP = new Set(['ул','улица','дом','д','проспект','пр','пр-т','просп','мкр',
   'микрорайон','мкрн','квартал','район','город','г','алматы','кв','квартира','подъезд',
-  'этаж','блок','корпус','жк','бц','street','дома']);
+  'этаж','блок','корпус','жк','бц','street','дома','st','str','almaty','avenue','ave']);
 function addrKey(a) {
   const t = String(a || '').toLowerCase().replace(/ё/g, 'е')
     .replace(/\b\d{6}\b/g, ' ').replace(/[.,"«»()]/g, ' ').split(/\s+/).filter(Boolean);
@@ -2064,7 +2081,7 @@ function addrKey(a) {
   t.forEach(w => {
     if (ADDR_STOP.has(w)) return;
     if (/^\d/.test(w)) nums.push(w.replace(/^0+/, ''));
-    else if (w.length >= 4) street.push(w);
+    else if (w.length >= 4) street.push(lat(w));
   });
   return { street, house: nums.length ? nums[nums.length - 1] : '' };
 }
@@ -2207,7 +2224,11 @@ function renderWolt() {
   // Пара ищется по телефону клиента: в 0080 и в Wolt это один и тот же номер.
   // Если у клиента несколько заказов — берём ближайший по времени.
   const byPhone = {};
-  anOrders.forEach(o => { const k = phKey(o.phone); if (k.length === 10) (byPhone[k] = byPhone[k] || []).push(o); });
+  anOrders.forEach(o => [o.phone, o.phoneD].forEach(v => {
+    const k = phKey(v); if (k.length !== 10) return;
+    const arr = byPhone[k] = byPhone[k] || [];
+    if (!arr.includes(o)) arr.push(o);
+  }));
   const ts = (d, t) => new Date(d + 'T' + (t || '00:00') + ':00Z').getTime();
   const wts = w => ts(w.createdDate, w.createdTime);
   const ots = o => ts(o.openDate, (o.openTime || '').slice(0,5));
@@ -2241,6 +2262,32 @@ function renderWolt() {
     }
   });
 
+  // Проход 3 — по имени получателя. Бывает, что в 0080 телефон не заполнен,
+  // а имя в обеих системах одно и то же.
+  pairs.forEach(p => {
+    if (p.o) return;
+    const nm = lat(p.w.client); if (nm.length < 4) return;
+    const cand = anOrders.filter(o => !taken.has(o) && isWoltOrder(o) && lat(o.client) === nm)
+      .map(o => ({ o, gap: Math.abs(ots(o) - wts(p.w)) }))
+      .filter(c => c.gap <= 2 * 864e5).sort((a,b) => a.gap - b.gap);
+    if (cand.length === 1) { taken.add(cand[0].o); p.o = cand[0].o; p.via = 'имени'; }
+  });
+
+  // Что не нашлось — покажем ближайших кандидатов, чтобы было видно почему
+  pairs.forEach(p => {
+    if (p.o) return;
+    const wa = addrKey(p.w.toAddr);
+    p.near = anOrders.filter(o => !taken.has(o) && isWoltOrder(o))
+      .map(o => {
+        const gap = Math.abs(ots(o) - wts(p.w));
+        const m = addrMatch(wa, addrKey(o.addr));
+        const nameEq = lat(o.client) && lat(o.client) === lat(p.w.client);
+        return { o, gap, m, nameEq, score: (m ? m * 10 : 0) + (nameEq ? 8 : 0) - gap / 864e5 };
+      })
+      .filter(c => (c.m || c.nameEq) && c.gap <= 3 * 864e5)
+      .sort((a,b) => b.score - a.score).slice(0, 2);
+  });
+
   const orphanOrders = anOrders.filter(o => isWoltOrder(o) && !taken.has(o));
   const spent   = woltRows.reduce((s, w) => s + w.fee, 0);
   // Что клиент заплатил за доставку — строка-услуга «Доставка …» в 0080
@@ -2255,6 +2302,7 @@ function renderWolt() {
   const rejected = woltRows.filter(w => /отклон|отмен/i.test(w.status));
   const nomatch  = pairs.filter(p => !p.o);
   const byAddr   = pairs.filter(p => p.via && p.via !== 'телефон').length;
+  const nearN    = pairs.filter(p => !p.o && (p.near || []).length).length;
   // Доставка вне периода загруженного 0080 — это не потеря, а другой отчёт
   const oDates = anOrders.map(o => o.openDate).filter(Boolean).sort();
   const dMin = oDates[0] || '', dMax = oDates[oDates.length - 1] || '';
@@ -2269,7 +2317,8 @@ function renderWolt() {
     ['Нашли заказ', (pairs.length - nomatch.length) + ' из ' + pairs.length,
      !nomatch.length ? (byAddr ? byAddr + ' по адресу' : 'все сопоставлены')
        : (nomatch.length - outside) + ' без пары' + (outside ? ' · ' + outside + ' вне периода 0080' : '')
-         + (byAddr ? ' · ' + byAddr + ' по адресу' : '')],
+         + (byAddr ? ' · ' + byAddr + ' не по телефону' : '')
+         + (nearN ? ' · ' + nearN + ' с подсказкой' : '')],
     ['Заказы без Wolt', String(orphanOrders.length), 'курьер Wolt в 0080, доставки нет']
   ].map(([l,v,s]) => `<div class="kpi"><div class="kpi-label">${l}</div><div class="kpi-val">${v}</div><div class="kpi-sub">${s}</div></div>`).join('');
 
@@ -2307,7 +2356,11 @@ function renderWolt() {
       <td>${o ? `№${o.num} · ${shortName(o.oper || '—')}<div style="font-size:10.5px;color:var(--text3);">${ruDate(o.openDate)} ${(o.openTime||'').slice(0,5)}${o.uchDate > o.openDate ? ' · предзаказ на ' + ruDate(o.uchDate) : ''}</div>${p.via && p.via !== 'телефон' ? `<i class="tag-free" title="Телефоны не совпали — заказ оформил один человек, а привезли другому">по ${p.via} — проверьте</i>` : ''}`
               : (w.createdDate < dMin || w.createdDate > dMax)
                 ? '<span style="color:var(--text3);">нет в загруженном 0080</span>'
-                : '<span style="color:var(--yellow);">заказ не найден</span>'}</td>
+                : '<span style="color:var(--yellow);">заказ не найден</span>' +
+                  ((p.near || []).length ? `<div style="font-size:10.5px;color:var(--text3);">похоже на ${
+                    p.near.map(c => `№${c.o.num} <span style="color:var(--text3);">(${
+                      [c.m === 2 ? 'адрес' : c.m === 1 ? 'улица' : '', c.nameEq ? 'имя' : ''].filter(Boolean).join(' + ')
+                    })</span>`).join(', ')}</div>` : '')}</td>
     </tr>`;
   };
 
@@ -2326,7 +2379,7 @@ function renderWolt() {
     ${orphanOrders.length ? `
       <div class="dt-foot" style="padding-left:0;margin-top:10px;">
         <b style="color:var(--yellow);">Заказы с курьером Wolt, для которых доставка не нашлась (${orphanOrders.length}):</b>
-        ${orphanOrders.map(o => '№' + o.num + ' от ' + ruDate(o.openDate) + (o.phone ? ' · ' + o.phone : '')).join(' · ')}
+        ${orphanOrders.map(o => '№' + o.num + ' от ' + ruDate(o.openDate) + ((o.phone || o.phoneD) ? ' · ' + (o.phone || o.phoneD) : '')).join(' · ')}
       </div>` : ''}
     ${branchAddrBlock()}
     <div class="dt-foot" style="padding-left:0;">Сопоставление по телефону клиента, затем по адресу доставки. Если пары нет — проверьте, тот ли период загружен в 0080.</div>`;
