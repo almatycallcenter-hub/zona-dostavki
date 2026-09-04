@@ -894,6 +894,17 @@ details[open] > summary .chev { transform:rotate(90deg); }
       </div>
 
       <div class="card">
+        <div class="card-head" style="flex-wrap:wrap;gap:8px;">
+          <div><div class="card-title">🛵 Wolt Drive — сколько отдали за доставку</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px;">откройте <b>drive.wolt.com → Доставки</b>, выберите период, нажмите Ctrl+A и Ctrl+C, а сюда — Ctrl+V. Сопоставим с заказами по телефону клиента</div></div>
+          <button class="btn btn-o btn-sm" onclick="parseWolt()">Сопоставить</button>
+        </div>
+        <textarea class="fi" id="woltPaste" rows="3" placeholder="Вставьте сюда список доставок с сайта Wolt Drive (Ctrl+V)"
+                  style="width:100%;font-family:var(--mono);font-size:11px;resize:vertical;"></textarea>
+        <div id="woltResult" style="margin-top:12px;font-size:13px;color:var(--text3);">Пока пусто — вставьте список и нажмите «Сопоставить»</div>
+      </div>
+
+      <div class="card">
         <div class="card-head">
           <div><div class="card-title">📦 Сверка блюд за прошлый день</div>
           <div style="font-size:11px;color:var(--text3);margin-top:2px;">выберите дату — сверим заказы с приходными накладными</div></div>
@@ -2004,8 +2015,134 @@ function initAnalyticsUpload() {
   });
 }
 
+// ── Wolt Drive ────────────────────────────────────
+// Экспорта у Wolt Drive нет, поэтому читаем то, что копируется со страницы
+// «Доставки». Структура блока держится на строках с датой: первая — когда
+// доставку создали, вторая — забор, третья — вручение.
+let woltRows = [];
+const RE_WDT   = /^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{1,2}):(\d{2})$/;
+const RE_WMONEY = /(\d[\d\s  ]*,\d{2})\s*KZT/;
+const RE_WPHONE = /^\+?\d[\d\s()\-]{8,}$/;
+const phKey = s => String(s || '').replace(/\D/g, '').slice(-10);
+
+function parseWoltText(text) {
+  const out = [];
+  for (const block of String(text || '').split(/(?=^#\d{3,}\s*$)/m)) {
+    const lines = block.split('\n').map(s => s.trim()).filter(Boolean);
+    if (!lines.length || !/^#(\d{3,})$/.test(lines[0])) continue;
+    const num = lines[0].slice(1);
+    const dt = [];
+    lines.forEach((l, i) => { const m = l.match(RE_WDT); if (m) dt.push({ i,
+      iso: `${m[3]}-${m[2]}-${m[1]}`, time: m[4].padStart(2,'0') + ':' + m[5] }); });
+    if (!dt.length) continue;
+    const pi = lines.findIndex(l => RE_WPHONE.test(l) && phKey(l).length === 10);
+    // Тариф — последняя сумма, рядом с которой нет «кг»: та, что с килограммами,
+    // это объявленная ценность посылки, а не деньги за доставку.
+    let fee = 0;
+    lines.forEach(l => { const m = l.match(RE_WMONEY); if (m && !/кг/i.test(l))
+      fee = parseFloat(m[1].replace(/[\s  ]/g, '').replace(',', '.')); });
+    const ti = lines.findIndex(l => /^Отслеживание$/i.test(l));
+    out.push({
+      num,
+      createdDate: dt[0].iso, createdTime: dt[0].time,
+      fromAddr: dt[1] ? lines[dt[1].i - 1] : '', fromTime: dt[1] ? dt[1].time : '',
+      toAddr:   dt[2] ? lines[dt[2].i - 1] : '', toTime:   dt[2] ? dt[2].time : '',
+      dropDate: (dt[2] || dt[1] || dt[0]).iso,
+      client: pi > 0 ? lines[pi - 1] : '',
+      phone: pi >= 0 ? phKey(lines[pi]) : '', phoneRaw: pi >= 0 ? lines[pi] : '',
+      fee,
+      status: ti > 0 ? lines[ti - 1] : (lines[lines.length - 1] || '')
+    });
+  }
+  return out;
+}
+
+function parseWolt() {
+  const box = document.getElementById('woltResult');
+  woltRows = parseWoltText(document.getElementById('woltPaste').value);
+  if (!woltRows.length) {
+    box.innerHTML = '<span style="color:var(--red);">Не разобрала ни одной доставки. Скопируйте страницу «Доставки» целиком: Ctrl+A, потом Ctrl+C.</span>';
+    return;
+  }
+  renderWolt();
+}
+
+function renderWolt() {
+  const box = document.getElementById('woltResult');
+  if (!woltRows.length) return;
+
+  // Пара ищется по телефону клиента: в 0080 и в Wolt это один и тот же номер.
+  // Если у клиента несколько заказов — берём ближайший по времени.
+  const byPhone = {};
+  anOrders.forEach(o => { const k = phKey(o.phone); if (k.length === 10) (byPhone[k] = byPhone[k] || []).push(o); });
+  const ts = (d, t) => new Date(d + 'T' + (t || '00:00') + ':00Z').getTime();
+  const taken = new Set();
+  const pairs = woltRows.slice().sort((a,b) => a.num < b.num ? -1 : 1).map(w => {
+    const cand = (byPhone[w.phone] || []).filter(o => !taken.has(o))
+      .map(o => ({ o, gap: Math.abs(ts(o.openDate, (o.openTime||'').slice(0,5)) - ts(w.createdDate, w.createdTime)) }))
+      .sort((a,b) => a.gap - b.gap);
+    const hit = cand.find(c => c.gap <= 5 * 864e5);
+    if (hit) taken.add(hit.o);
+    return { w, o: hit ? hit.o : null };
+  });
+
+  const isWoltOrder = o => /wolt/i.test(o.courier || '');
+  const orphanOrders = anOrders.filter(o => isWoltOrder(o) && !taken.has(o));
+  const spent   = woltRows.reduce((s, w) => s + w.fee, 0);
+  const rejected = woltRows.filter(w => /отклон|отмен/i.test(w.status));
+  const nomatch  = pairs.filter(p => !p.o);
+  // Доставка вне периода загруженного 0080 — это не потеря, а другой отчёт
+  const oDates = anOrders.map(o => o.openDate).filter(Boolean).sort();
+  const dMin = oDates[0] || '', dMax = oDates[oDates.length - 1] || '';
+  const outside = nomatch.filter(p => p.w.createdDate < dMin || p.w.createdDate > dMax).length;
+
+  const kpi = [
+    ['Доставок Wolt', String(woltRows.length), ''],
+    ['Отдали за доставку', kFmt(Math.round(spent)), 'средний тариф ' + kFmt(Math.round(spent / woltRows.length))],
+    ['Отклонены', String(rejected.length), rejected.length ? kFmt(Math.round(rejected.reduce((s,w)=>s+w.fee,0))) + ' — проверьте счёт' : 'все доехали'],
+    ['Нашли заказ', (pairs.length - nomatch.length) + ' из ' + pairs.length,
+     !nomatch.length ? 'все сопоставлены'
+       : (nomatch.length - outside) + ' без пары' + (outside ? ' · ' + outside + ' вне периода 0080' : '')],
+    ['Заказы без Wolt', String(orphanOrders.length), 'курьер Wolt в 0080, доставки нет']
+  ].map(([l,v,s]) => `<div class="kpi"><div class="kpi-label">${l}</div><div class="kpi-val">${v}</div><div class="kpi-sub">${s}</div></div>`).join('');
+
+  const trow = p => {
+    const w = p.w, o = p.o;
+    const share = o && o.sum ? Math.round(w.fee / o.sum * 100) : null;
+    const bad = /отклон|отмен/i.test(w.status);
+    return `<tr>
+      <td class="mo">#${w.num}</td>
+      <td>${ruDate(w.createdDate)} ${w.createdTime}<div style="font-size:10.5px;color:var(--text3);">${w.toAddr || '—'}${w.toTime ? ' · ' + w.toTime : ''}</div></td>
+      <td>${w.client || '—'}<div style="font-size:10.5px;color:var(--text3);" class="mo">${w.phoneRaw || ''}</div></td>
+      <td class="mo" style="text-align:right;">${kFmt(Math.round(w.fee))}</td>
+      <td><span style="color:${bad ? 'var(--red)' : 'var(--text3)'};font-size:11.5px;">${w.status || '—'}</span></td>
+      <td>${o ? `№${o.num} · ${shortName(o.oper || '—')}<div style="font-size:10.5px;color:var(--text3);">${ruDate(o.openDate)} ${(o.openTime||'').slice(0,5)}${o.uchDate > o.openDate ? ' · предзаказ на ' + ruDate(o.uchDate) : ''}</div>`
+              : (w.createdDate < dMin || w.createdDate > dMax)
+                ? '<span style="color:var(--text3);">нет в загруженном 0080</span>'
+                : '<span style="color:var(--yellow);">заказ не найден</span>'}</td>
+      <td class="mo" style="text-align:right;">${o ? kFmt(o.sum) + (share !== null ? `<div style="font-size:10.5px;color:var(--text3);">доставка ${share}%</div>` : '') : '—'}</td>
+    </tr>`;
+  };
+
+  box.innerHTML = `
+    <div class="kpi-row" style="margin-bottom:12px;">${kpi}</div>
+    <div class="tbl-wrap"><table class="tbl">
+      <thead><tr>
+        <th>Wolt</th><th>Создано · куда</th><th>Получатель</th>
+        <th style="text-align:right;">Тариф</th><th>Статус</th><th>Заказ в iiko</th><th style="text-align:right;">Сумма заказа</th>
+      </tr></thead>
+      <tbody>${pairs.map(trow).join('')}</tbody>
+    </table></div>
+    ${orphanOrders.length ? `
+      <div class="dt-foot" style="padding-left:0;margin-top:10px;">
+        <b style="color:var(--yellow);">Заказы с курьером Wolt, для которых доставка не нашлась (${orphanOrders.length}):</b>
+        ${orphanOrders.map(o => '№' + o.num + ' от ' + ruDate(o.openDate) + (o.phone ? ' · ' + o.phone : '')).join(' · ')}
+      </div>` : ''}
+    <div class="dt-foot" style="padding-left:0;">Сопоставление по телефону клиента; при нескольких заказах на один номер берётся ближайший по времени. Если пары нет — проверьте, тот ли период загружен в 0080.</div>`;
+}
+
 function resetAnalytics() {
-  anOrders = []; anInvoices = [];
+  anOrders = []; anInvoices = []; woltRows = [];
   ['anZone','anPrihodZone'].forEach(id => { const z = document.getElementById(id); if (z) z.className = 'upload-zone'; });
   location.hash = '#analytics'; location.reload();
 }
@@ -2296,6 +2433,7 @@ function renderAnalytics() {
   sel.innerHTML = uch.map(d => `<option value="${d}">${dayLabel(d)}</option>`).join('');
   if (uch.includes(keep)) sel.value = keep;
   renderRetro();
+  if (woltRows.length) renderWolt();
 }
 
 // Раскладывает позиции заказа по категориям и блюдам сразу в несколько корзин.
