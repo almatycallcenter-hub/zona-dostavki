@@ -2098,6 +2098,18 @@ function addrMatch(a, b) {
 // точками, храним соответствие «адрес → код филиала». Что не узнали по
 // названию — оператор проставляет руками, выбор запоминается в браузере.
 let BRANCH_ADDR = {};
+// Ручные связки «доставка Wolt → заказ iiko»: то, что автоматика не нашла,
+// оператор связывает сам, и выбор переживает перезагрузку страницы.
+let WOLT_LINK = {};
+function loadWoltLink() {
+  try { WOLT_LINK = JSON.parse(localStorage.getItem('woltLink') || '{}'); }
+  catch (e) { WOLT_LINK = {}; }
+}
+function setWoltLink(woltNum, orderNum) {
+  if (orderNum) WOLT_LINK[woltNum] = orderNum; else delete WOLT_LINK[woltNum];
+  try { localStorage.setItem('woltLink', JSON.stringify(WOLT_LINK)); } catch (e) {}
+  renderWolt();
+}
 function loadBranchAddr() {
   try { BRANCH_ADDR = JSON.parse(localStorage.getItem('branchAddr') || '{}'); }
   catch (e) { BRANCH_ADDR = {}; }
@@ -2236,8 +2248,17 @@ function renderWolt() {
   const taken = new Set();
   const sorted = woltRows.slice().sort((a,b) => a.num < b.num ? -1 : 1);
 
+  // Проход 0 — то, что оператор связал руками. Перебивает любую автоматику.
+  sorted.forEach(w => {
+    const num = WOLT_LINK[w.num]; if (!num) return;
+    const o = anOrders.find(x => x.num === num);
+    if (o) taken.add(o);
+  });
+
   // Проход 1 — по телефону клиента. Самый надёжный признак.
   const pairs = sorted.map(w => {
+    const manual = WOLT_LINK[w.num] ? anOrders.find(x => x.num === WOLT_LINK[w.num]) : null;
+    if (manual) return { w, o: manual, via: 'вручную' };
     const cand = (byPhone[w.phone] || []).filter(o => !taken.has(o))
       .map(o => ({ o, gap: Math.abs(ots(o) - wts(w)) })).sort((a,b) => a.gap - b.gap);
     const hit = cand.find(c => c.gap <= 5 * 864e5);
@@ -2348,6 +2369,20 @@ function renderWolt() {
     ['Заказы без Wolt', String(orphanOrders.length), 'курьер Wolt в 0080, доставки нет']
   ].map(([l,v,s]) => `<div class="kpi"><div class="kpi-label">${l}</div><div class="kpi-val">${v}</div><div class="kpi-sub">${s}</div></div>`).join('');
 
+  // Выпадающий список свободных заказов с курьером Wolt — чтобы связать руками.
+  // Сортируем по близости ко времени создания доставки: нужный обычно первый.
+  const linkPicker = (w, p) => {
+    if (!orphanOrders.length) return '';
+    const near = new Set((p.near || []).map(c => c.o.num));
+    const opts = orphanOrders.slice()
+      .sort((a, b) => Math.abs(ots(a) - wts(w)) - Math.abs(ots(b) - wts(w)))
+      .map(o => `<option value="${o.num}">№${o.num} · ${ruDate(o.openDate)} ${(o.openTime||'').slice(0,5)} · ${
+        (o.client || '—')} · ${(o.addr || '—').slice(0, 34)} · ${kFmt(o.sum)}${near.has(o.num) ? '  ★' : ''}</option>`).join('');
+    return `<div style="margin-top:4px;"><select class="fi" style="width:100%;max-width:290px;padding:2px 6px;font-size:11px;"
+      onchange="setWoltLink('${w.num}', this.value)">
+      <option value="">— связать вручную —</option>${opts}</select></div>`;
+  };
+
   const trow = p => {
     const w = p.w, o = p.o;
     const paid  = o ? delivPaid(o) : 0;            // сколько клиент отдал за доставку
@@ -2379,7 +2414,10 @@ function renderWolt() {
               : `<div style="font-size:10.5px;color:${diff < 0 ? 'var(--red)' : 'var(--text3)'};">${diff >= 0 ? '+' : ''}${kFmt(Math.round(diff))}</div>`) : '—'}</td>
       <td class="mo" style="text-align:right;">${o ? kFmt(Math.round(goods)) +
         `<div style="font-size:10.5px;color:var(--text3);">с доставкой ${kFmt(o.sum)}</div>` : '—'}</td>
-      <td>${o ? `№${o.num} · ${shortName(o.oper || '—')}<div style="font-size:10.5px;color:var(--text3);">${ruDate(o.openDate)} ${(o.openTime||'').slice(0,5)}${o.uchDate > o.openDate ? ' · предзаказ на ' + ruDate(o.uchDate) : ''}</div>${p.via && p.via !== 'телефон' ? `<i class="tag-free" title="Телефоны не совпали — заказ оформил один человек, а привезли другому">по ${p.via} — проверьте</i>` : ''}`
+      <td>${o ? `№${o.num} · ${shortName(o.oper || '—')}<div style="font-size:10.5px;color:var(--text3);">${ruDate(o.openDate)} ${(o.openTime||'').slice(0,5)}${o.uchDate > o.openDate ? ' · предзаказ на ' + ruDate(o.uchDate) : ''}</div>${
+                p.via === 'вручную'
+                  ? `<i class="tag-pre">связано вручную</i> <a href="#" onclick="setWoltLink('${w.num}','');return false;" style="font-size:10.5px;color:var(--text3);">убрать</a>`
+                  : p.via && p.via !== 'телефон' ? `<i class="tag-free" title="Телефоны не совпали — заказ оформил один человек, а привезли другому">по ${p.via} — проверьте</i>` : ''}`
               : (w.createdDate < dMin || w.createdDate > dMax)
                 ? '<span style="color:var(--text3);">нет в загруженном 0080</span>'
                 : '<span style="color:var(--yellow);">заказ не найден</span>' +
@@ -2387,7 +2425,7 @@ function renderWolt() {
                     p.near.map(c => `№${c.o.num} <span style="color:var(--text3);">(${
                       [c.m === 2 ? 'адрес' : c.m === 1 ? 'улица' : '', c.nameEq ? 'имя' : '',
                        c.brOk ? 'филиал' : '', c.feeOk ? 'сумма доставки' : ''].filter(Boolean).join(' + ')
-                    })</span>`).join(', ')}</div>` : '')}</td>
+                    })</span>`).join(', ')}</div>` : '') + linkPicker(w, p)}</td>
     </tr>`;
   };
 
@@ -2677,6 +2715,7 @@ function renderWoltInvoice() {
 
 function resetAnalytics() {
   anOrders = []; anInvoices = []; woltRows = []; wiRows = [];
+  WOLT_LINK = {}; try { localStorage.removeItem('woltLink'); } catch (e) {}
   ['anZone','anPrihodZone','wiZone'].forEach(id => { const z = document.getElementById(id); if (z) z.className = 'upload-zone'; });
   location.hash = '#analytics'; location.reload();
 }
@@ -3557,6 +3596,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initAnalyticsUpload();
   initWoltInvoice();
   loadBranchAddr();
+  loadWoltLink();
   const url = ls('scriptUrl');
   if(url && url !== 'undefined'){ document.getElementById('scriptUrl').value=url; updateConnBadge(true); }
   else if(url === 'undefined'){ localStorage.removeItem('scriptUrl'); }
