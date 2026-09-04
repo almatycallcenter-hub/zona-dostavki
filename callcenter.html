@@ -306,6 +306,8 @@ details[open] > summary .chev { transform:rotate(90deg); }
 .tag-mod, .tag-pre { font-style:normal; font-size:10px; border-radius:5px; padding:0 4px; white-space:nowrap; }
 .tag-mod { color:var(--text3); border:1px solid var(--border); }
 .tag-pre { color:var(--a2); background:var(--glow); }
+.tag-free { font-style:normal; font-size:10px; border-radius:5px; padding:0 4px; color:#8a5a00; background:#fff2d0; }
+.ord-meta { font-style:normal; font-size:10.5px; color:var(--text3); opacity:.85; }
 @media(max-width:700px){ .dt-days { padding-left:0; } .dt-foot { padding-left:0; } }
 
 /* ── G2 GRID ─────────────────────────── */
@@ -860,6 +862,14 @@ details[open] > summary .chev { transform:rotate(90deg); }
       </div>
 
       <div class="card">
+        <div class="card-head">
+          <div><div class="card-title">🔍 День в двух разрезах</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px;">слева — сколько заказов приняли в этот день, справа — сколько попало в 0080 за этот день. Считается за выбранный период, фильтры «предзаказ/дневной» и категории здесь не действуют</div></div>
+        </div>
+        <div id="chartSplit"></div>
+      </div>
+
+      <div class="card">
         <div class="card-head" style="flex-wrap:wrap;gap:8px;"><div><div class="card-title">🗓 По дням недели</div>
           <div style="font-size:11px;color:var(--text3);margin-top:2px;">в какие дни заказов больше</div></div>
           <div class="txn-filters">
@@ -1190,6 +1200,7 @@ function parseIikoAoa(aoa) {
   const cComment = C('комментарий к доставке'), cAddr = C('адрес'), cDish = C('блюдо');
   const cCat = C('категория блюда'), cQty = C('количество блюд'), cDType = C('тип доставки');
   const cIType = C('тип товара');
+  const cPlan = C('планируемое время доставки');
   const cSum = C('сумма со скидкой, тенге') >= 0 ? C('сумма со скидкой, тенге') : C('сумма со скидкой');
   if (cOpen < 0 || cSum < 0) throw new Error('В отчёте нет колонок «Время открытия» / «Сумма со скидкой»');
 
@@ -1202,6 +1213,7 @@ function parseIikoAoa(aoa) {
       if (dt) {
         cur = {
           openDT: dt, openDate: dtDate(dt), openTime: dtTime(dt),
+          planDT: (cPlan >= 0 ? iikoCellToDT(row[cPlan]) : null),
           uchDate: dtDate(iikoCellToDT(cUch >= 0 ? row[cUch] : null)) || dtDate(dt),
           oper: String((cOper>=0?row[cOper]:'')||'').split('/')[0].trim(),
           num: String((cNum>=0?row[cNum]:'')||'').trim(),
@@ -2098,7 +2110,7 @@ function renderAnalytics() {
   document.getElementById('anBadge').className = 'badge ' + (rows.length ? 'bg' : 'by');
   if (!rows.length) {
     document.getElementById('anKpi').innerHTML = '<div class="kpi"><div class="kpi-label">Пусто</div><div class="kpi-val">—</div><div class="kpi-sub">в выбранном периоде нет заказов</div></div>';
-    ['chartOper','chartCats','chartGoods','chartDays','chartDow','chartPre','chartBranch','chartCourier']
+    ['chartOper','chartCats','chartGoods','chartDays','chartDow','chartPre','chartSplit','chartBranch','chartCourier']
       .forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ''; });
     return;
   }
@@ -2128,7 +2140,9 @@ function renderAnalytics() {
     anType === 'all'
       ? ['Предзаказы', pre + ' шт', Math.round(pre / rows.length * 100) + '% · ' + kFmt(preSum)]
       : ['Отобрано', rows.length + ' из ' + anOrders.length, anType === 'pre' ? 'только предзаказы' : 'только дневные'],
-    ['Самовывоз', pickup + ' шт', Math.round(pickup / rows.length * 100) + '% заказов']
+    ['Самовывоз', pickup + ' шт', Math.round(pickup / rows.length * 100) + '% заказов'],
+    ['Упущенная доставка', rows.filter(freeMiss).length + ' шт',
+     'самовывоз от ' + kFmt(FREE_DELIVERY_FROM) + ' — доставка бесплатная']
   ].map(([l, v, s]) => `<div class="kpi"><div class="kpi-label">${l}</div><div class="kpi-val">${v}</div><div class="kpi-sub">${s}</div></div>`).join('');
 
   // ── Выручка по операторам, с раскрытием по дням ──
@@ -2206,6 +2220,45 @@ function renderAnalytics() {
   const preSeries = [{ key:'pre', name:'Предзаказ', color:VIZ.s3 }, { key:'day', name:'Дневной', color:VIZ.s1 }];
   document.getElementById('chartPre').innerHTML = stackChart(dayList, preSeries);
   document.getElementById('legendPre').innerHTML = legend(preSeries);
+
+  // ── День в двух разрезах ──────────────────────────
+  // Одна и та же дата даёт два разных числа: сколько заказов ПРИНЯЛИ в этот
+  // день и сколько заказов iiko показывает в 0080 ЗА этот день. Разница —
+  // предзаказы. Таблица показывает оба числа рядом, чтобы их не путали.
+  {
+    const f = document.getElementById('anFrom')?.value || '';
+    const t = document.getElementById('anTo')?.value || '';
+    const inR = d => d && (!f || d >= f) && (!t || d <= t);
+    const src = anOrders.filter(o => inR(o.openDate) || inR(o.uchDate));
+    const dl = [...new Set(src.flatMap(o => [o.openDate, o.uchDate]))].filter(inR).sort();
+    document.getElementById('chartSplit').innerHTML = dl.length ? `
+      <div class="tbl-wrap"><table class="tbl">
+        <thead><tr>
+          <th>День</th>
+          <th style="text-align:right;">Приняли в этот день</th>
+          <th style="text-align:right;">На этот же день</th>
+          <th style="text-align:right;">На будущие даты</th>
+          <th style="text-align:right;">Всего в 0080 за день</th>
+          <th style="text-align:right;">Из них приняты раньше</th>
+        </tr></thead>
+        <tbody>${dl.map(d => {
+          const acc = src.filter(o => o.openDate === d);
+          const uch = src.filter(o => o.uchDate === d);
+          const same = acc.filter(o => o.uchDate === d).length;
+          const fut  = acc.length - same;
+          const early = uch.filter(o => o.openDate && o.openDate < d).length;
+          return `<tr>
+            <td>${dayLabel(d)}</td>
+            <td class="mo" style="text-align:right;font-weight:600;">${acc.length}</td>
+            <td class="mo" style="text-align:right;color:var(--text3);">${same}</td>
+            <td class="mo" style="text-align:right;color:var(--text3);">${fut || '—'}</td>
+            <td class="mo" style="text-align:right;font-weight:${uch.length?600:400};color:${uch.length?'':'var(--text3)'};">${uch.length || '—'}</td>
+            <td class="mo" style="text-align:right;color:var(--text3);">${early || '—'}</td>
+          </tr>`; }).join('')}</tbody>
+      </table></div>
+      <div class="dt-foot" style="padding-left:10px;">Всего в 0080 за день = «на этот же день» + «приняты раньше». Числа выше в графиках считаются по выбранному разрезу — сейчас <b>${anCut === 'uch' ? 'по учётному дню' : 'по дате принятия'}</b>.</div>`
+      : '<div style="font-size:12px;color:var(--text3);">Нет данных</div>';
+  }
 
   // ── По дням недели ──
   const dow = Array.from({length:7}, (_, i) => ({ i, n:0, sum:0, pre:0, pickup:0 }));
@@ -2285,6 +2338,28 @@ function buildGroups(rows, keyFn) {
   return g;
 }
 
+// Доставка бесплатна от этой суммы. Самовывоз на такой чек — упущенная
+// возможность: клиенту можно было предложить привезти, и это ничего не стоит.
+const FREE_DELIVERY_FROM = 30000;
+const plural = (n, one, few, many) => n + ' ' +
+  (n % 10 === 1 && n % 100 !== 11 ? one
+   : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? few : many);
+const freeMiss = o => isPickup(o) && o.sum >= FREE_DELIVERY_FROM;
+
+// Строка заказа: кто принял, когда принял, на какое время обещали
+function orderLine(o) {
+  const pd = o.planDT ? dtDate(o.planDT) : '';
+  const plan = o.planDT
+    ? 'план ' + (pd && pd !== anDate(o) ? ruDate(pd) + ' ' : '') + dtTime(o.planDT).slice(0,5)
+    : 'план не указан';
+  const meta = [o.oper ? shortName(o.oper) : '— оператор не указан',
+                'принят ' + (o.openTime || '').slice(0,5), plan].join(' · ');
+  return `<div>
+    <span>№${o.num || '—'} · ${dayLabel(anDate(o))}${o.client ? ' · ' + o.client : ''}${isPre(o) ? ' <i class="tag-pre">предзаказ</i>' : ''}${freeMiss(o) ? ' <i class="tag-free" title="Чек от ' + kFmt(FREE_DELIVERY_FROM) + ' — доставку можно было предложить бесплатно">бесплатная доставка</i>' : ''}
+      <br><i class="ord-meta">${meta}</i></span>
+    <span>${kFmt(oSum(o))}</span></div>`;
+}
+
 function groupBlock(groups, color) {
   const arr = Object.values(groups).sort((a,b) => b.n - a.n);
   if (!arr.length) return '<div style="font-size:12px;color:var(--text3);padding:8px 0;">Нет данных</div>';
@@ -2299,12 +2374,13 @@ function groupBlock(groups, color) {
         </div>
       </summary>
       <div class="dt-body">
-        <div class="dt-foot">${kFmt(Math.round(g.sum))} · средний чек ${kFmt(Math.round(g.sum/g.n))} · предзаказов ${g.pre}</div>
+        <div class="dt-foot">${kFmt(Math.round(g.sum))} · средний чек ${kFmt(Math.round(g.sum/g.n))} · предзаказов ${g.pre}${
+          (() => { const m = g.orders.filter(freeMiss); return m.length
+            ? ` · <span style="color:var(--yellow)">${plural(m.length, 'самовывоз', 'самовывоза', 'самовывозов')} от ${kFmt(FREE_DELIVERY_FROM)} — доставка была бы бесплатной</span>` : ''; })()}</div>
         ${catBlock(g.cats)}
         <details class="dt dt-leaf">
           <summary><div class="dt-dish"><span><span class="chev">▶</span> Заказы</span><span>${g.orders.length}</span></div></summary>
-          <div class="dt-days">${g.orders.slice().sort((a,b) => a.openDT < b.openDT ? -1 : 1).map(o => `
-            <div><span>№${o.num || '—'} · ${dayLabel(anDate(o))}${o.client ? ' · ' + o.client : ''}${isPre(o) ? ' · <i class="tag-pre">предзаказ</i>' : ''}</span><span>${kFmt(oSum(o))}</span></div>`).join('')}</div>
+          <div class="dt-days">${g.orders.slice().sort((a,b) => a.openDT < b.openDT ? -1 : 1).map(orderLine).join('')}</div>
         </details>
       </div>
     </details>`).join('');
