@@ -2042,6 +2042,30 @@ const phKey = s => String(s || '').replace(/\D/g, '').slice(-10);
 // «Доставка сводная цена», «Доставка по городу…» — это услуга, её оплатил клиент
 // Предзаказ забирают на следующий день — тогда показываем и дату
 const wAt = (d, t, base) => (d && d !== base ? ruDate(d) + ' ' : '') + t;
+// Адреса пишут по-разному: «ул. улица Сатпаева д. 105» и «улица Сатпаева 105,
+// 050000, Алматы» — это одно и то же. Сводим к названию улицы и номеру дома.
+const ADDR_STOP = new Set(['ул','улица','дом','д','проспект','пр','пр-т','просп','мкр',
+  'микрорайон','мкрн','квартал','район','город','г','алматы','кв','квартира','подъезд',
+  'этаж','блок','корпус','жк','бц','street','дома']);
+function addrKey(a) {
+  const t = String(a || '').toLowerCase().replace(/ё/g, 'е')
+    .replace(/\b\d{6}\b/g, ' ').replace(/[.,"«»()]/g, ' ').split(/\s+/).filter(Boolean);
+  const street = [], nums = [];
+  t.forEach(w => {
+    if (ADDR_STOP.has(w)) return;
+    if (/^\d/.test(w)) nums.push(w.replace(/^0+/, ''));
+    else if (w.length >= 4) street.push(w);
+  });
+  return { street, house: nums.length ? nums[nums.length - 1] : '' };
+}
+// 2 — улица и дом совпали, 1 — только улица, 0 — не совпало
+function addrMatch(a, b) {
+  if (!a.street.length || !b.street.length) return 0;
+  if (!a.street.some(x => b.street.some(y => x === y || x.startsWith(y) || y.startsWith(x)))) return 0;
+  const h1 = a.house, h2 = b.house;
+  if (!h1 || !h2 || h1 === '-' || h2 === '-') return 1;
+  return (h1 === h2 || h1.startsWith(h2) || h2.startsWith(h1)) ? 2 : 0;
+}
 const delivPaid = o => (o.items || [])
   .filter(it => /достав/i.test(it.dish || '')).reduce((s, it) => s + (it.sum || 0), 0);
 
@@ -2096,23 +2120,45 @@ function renderWolt() {
   const byPhone = {};
   anOrders.forEach(o => { const k = phKey(o.phone); if (k.length === 10) (byPhone[k] = byPhone[k] || []).push(o); });
   const ts = (d, t) => new Date(d + 'T' + (t || '00:00') + ':00Z').getTime();
+  const wts = w => ts(w.createdDate, w.createdTime);
+  const ots = o => ts(o.openDate, (o.openTime || '').slice(0,5));
+  const isWoltOrder = o => /wolt/i.test(o.courier || '');
   const taken = new Set();
-  const pairs = woltRows.slice().sort((a,b) => a.num < b.num ? -1 : 1).map(w => {
+  const sorted = woltRows.slice().sort((a,b) => a.num < b.num ? -1 : 1);
+
+  // Проход 1 — по телефону клиента. Самый надёжный признак.
+  const pairs = sorted.map(w => {
     const cand = (byPhone[w.phone] || []).filter(o => !taken.has(o))
-      .map(o => ({ o, gap: Math.abs(ts(o.openDate, (o.openTime||'').slice(0,5)) - ts(w.createdDate, w.createdTime)) }))
-      .sort((a,b) => a.gap - b.gap);
+      .map(o => ({ o, gap: Math.abs(ots(o) - wts(w)) })).sort((a,b) => a.gap - b.gap);
     const hit = cand.find(c => c.gap <= 5 * 864e5);
     if (hit) taken.add(hit.o);
-    return { w, o: hit ? hit.o : null };
+    return { w, o: hit ? hit.o : null, via: hit ? 'телефон' : '' };
   });
 
-  const isWoltOrder = o => /wolt/i.test(o.courier || '');
+  // Проход 2 — по адресу доставки. Нужен, когда заказ оформил один человек,
+  // а привезли другому: телефоны в 0080 и в Wolt тогда разные.
+  pairs.forEach(p => {
+    if (p.o) return;
+    const wa = addrKey(p.w.toAddr);
+    if (!wa.street.length) return;
+    const cand = anOrders.filter(o => !taken.has(o) && isWoltOrder(o))
+      .map(o => ({ o, m: addrMatch(wa, addrKey(o.addr)), gap: Math.abs(ots(o) - wts(p.w)) }))
+      .filter(c => c.m && c.gap <= 2 * 864e5)
+      .sort((a,b) => b.m - a.m || a.gap - b.gap);
+    if (cand.length) {
+      taken.add(cand[0].o);
+      p.o = cand[0].o;
+      p.via = cand[0].m === 2 ? 'адресу' : 'улице';
+    }
+  });
+
   const orphanOrders = anOrders.filter(o => isWoltOrder(o) && !taken.has(o));
   const spent   = woltRows.reduce((s, w) => s + w.fee, 0);
   // Что клиент заплатил за доставку — строка-услуга «Доставка …» в 0080
   const collected = pairs.reduce((s, p) => s + (p.o ? delivPaid(p.o) : 0), 0);
   const rejected = woltRows.filter(w => /отклон|отмен/i.test(w.status));
   const nomatch  = pairs.filter(p => !p.o);
+  const byAddr   = pairs.filter(p => p.via && p.via !== 'телефон').length;
   // Доставка вне периода загруженного 0080 — это не потеря, а другой отчёт
   const oDates = anOrders.map(o => o.openDate).filter(Boolean).sort();
   const dMin = oDates[0] || '', dMax = oDates[oDates.length - 1] || '';
@@ -2125,8 +2171,9 @@ function renderWolt() {
      (collected - spent >= 0 ? 'доставка в плюс ' : 'доплатили ') + kFmt(Math.abs(Math.round(collected - spent)))],
     ['Отклонены', String(rejected.length), rejected.length ? kFmt(Math.round(rejected.reduce((s,w)=>s+w.fee,0))) + ' — проверьте счёт' : 'все доехали'],
     ['Нашли заказ', (pairs.length - nomatch.length) + ' из ' + pairs.length,
-     !nomatch.length ? 'все сопоставлены'
-       : (nomatch.length - outside) + ' без пары' + (outside ? ' · ' + outside + ' вне периода 0080' : '')],
+     !nomatch.length ? (byAddr ? byAddr + ' по адресу' : 'все сопоставлены')
+       : (nomatch.length - outside) + ' без пары' + (outside ? ' · ' + outside + ' вне периода 0080' : '')
+         + (byAddr ? ' · ' + byAddr + ' по адресу' : '')],
     ['Заказы без Wolt', String(orphanOrders.length), 'курьер Wolt в 0080, доставки нет']
   ].map(([l,v,s]) => `<div class="kpi"><div class="kpi-label">${l}</div><div class="kpi-val">${v}</div><div class="kpi-sub">${s}</div></div>`).join('');
 
@@ -2150,7 +2197,7 @@ function renderWolt() {
         `<div style="font-size:10.5px;color:${diff < 0 ? 'var(--red)' : 'var(--text3)'};">${diff >= 0 ? '+' : ''}${kFmt(Math.round(diff))}</div>` : '—'}</td>
       <td class="mo" style="text-align:right;">${o ? kFmt(Math.round(goods)) +
         `<div style="font-size:10.5px;color:var(--text3);">с доставкой ${kFmt(o.sum)}</div>` : '—'}</td>
-      <td>${o ? `№${o.num} · ${shortName(o.oper || '—')}<div style="font-size:10.5px;color:var(--text3);">${ruDate(o.openDate)} ${(o.openTime||'').slice(0,5)}${o.uchDate > o.openDate ? ' · предзаказ на ' + ruDate(o.uchDate) : ''}</div>`
+      <td>${o ? `№${o.num} · ${shortName(o.oper || '—')}<div style="font-size:10.5px;color:var(--text3);">${ruDate(o.openDate)} ${(o.openTime||'').slice(0,5)}${o.uchDate > o.openDate ? ' · предзаказ на ' + ruDate(o.uchDate) : ''}</div>${p.via && p.via !== 'телефон' ? `<i class="tag-free" title="Телефоны не совпали — заказ оформил один человек, а привезли другому">по ${p.via} — проверьте</i>` : ''}`
               : (w.createdDate < dMin || w.createdDate > dMax)
                 ? '<span style="color:var(--text3);">нет в загруженном 0080</span>'
                 : '<span style="color:var(--yellow);">заказ не найден</span>'}</td>
