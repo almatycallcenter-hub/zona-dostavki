@@ -906,6 +906,21 @@ details[open] > summary .chev { transform:rotate(90deg); }
 
       <div class="card">
         <div class="card-head">
+          <div><div class="card-title">🧾 Счёт Wolt за месяц</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px;">«Отчёт о заказах» — PDF, который Wolt присылает в начале следующего месяца. Разложим по дням и филиалам и сверим с заказами</div></div>
+          <span class="badge by" id="wiBadge">Нет счёта</span>
+        </div>
+        <div class="upload-zone" id="wiZone" style="padding:18px;margin-bottom:0;" onclick="document.getElementById('wiFile').click()">
+          <div style="font-size:24px;margin-bottom:6px;">🧾</div>
+          <div style="font-size:13px;font-weight:700;">Счёт Wolt (PDF)</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:3px;">KAZ_..._order_list.pdf</div>
+        </div>
+        <input type="file" id="wiFile" accept=".pdf" style="display:none;">
+        <div id="wiResult" style="margin-top:12px;"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
           <div><div class="card-title">📦 Сверка блюд за прошлый день</div>
           <div style="font-size:11px;color:var(--text3);margin-top:2px;">выберите дату — сверим заказы с приходными накладными</div></div>
           <select class="fi" id="anRetroDate" style="width:auto;min-width:150px;" onchange="renderRetro()"></select>
@@ -2024,6 +2039,11 @@ const RE_WDT   = /^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{1,2}):(\d{2})$/;
 const RE_WMONEY = /(\d[\d\s  ]*,\d{2})\s*KZT/;
 const RE_WPHONE = /^\+?\d[\d\s()\-]{8,}$/;
 const phKey = s => String(s || '').replace(/\D/g, '').slice(-10);
+// «Доставка сводная цена», «Доставка по городу…» — это услуга, её оплатил клиент
+// Предзаказ забирают на следующий день — тогда показываем и дату
+const wAt = (d, t, base) => (d && d !== base ? ruDate(d) + ' ' : '') + t;
+const delivPaid = o => (o.items || [])
+  .filter(it => /достав/i.test(it.dish || '')).reduce((s, it) => s + (it.sum || 0), 0);
 
 function parseWoltText(text) {
   const out = [];
@@ -2045,8 +2065,8 @@ function parseWoltText(text) {
     out.push({
       num,
       createdDate: dt[0].iso, createdTime: dt[0].time,
-      fromAddr: dt[1] ? lines[dt[1].i - 1] : '', fromTime: dt[1] ? dt[1].time : '',
-      toAddr:   dt[2] ? lines[dt[2].i - 1] : '', toTime:   dt[2] ? dt[2].time : '',
+      fromAddr: dt[1] ? lines[dt[1].i - 1] : '', fromTime: dt[1] ? dt[1].time : '', fromDate: dt[1] ? dt[1].iso : '',
+      toAddr:   dt[2] ? lines[dt[2].i - 1] : '', toTime:   dt[2] ? dt[2].time : '', toDate:   dt[2] ? dt[2].iso : '',
       dropDate: (dt[2] || dt[1] || dt[0]).iso,
       client: pi > 0 ? lines[pi - 1] : '',
       phone: pi >= 0 ? phKey(lines[pi]) : '', phoneRaw: pi >= 0 ? lines[pi] : '',
@@ -2089,6 +2109,8 @@ function renderWolt() {
   const isWoltOrder = o => /wolt/i.test(o.courier || '');
   const orphanOrders = anOrders.filter(o => isWoltOrder(o) && !taken.has(o));
   const spent   = woltRows.reduce((s, w) => s + w.fee, 0);
+  // Что клиент заплатил за доставку — строка-услуга «Доставка …» в 0080
+  const collected = pairs.reduce((s, p) => s + (p.o ? delivPaid(p.o) : 0), 0);
   const rejected = woltRows.filter(w => /отклон|отмен/i.test(w.status));
   const nomatch  = pairs.filter(p => !p.o);
   // Доставка вне периода загруженного 0080 — это не потеря, а другой отчёт
@@ -2098,7 +2120,9 @@ function renderWolt() {
 
   const kpi = [
     ['Доставок Wolt', String(woltRows.length), ''],
-    ['Отдали за доставку', kFmt(Math.round(spent)), 'средний тариф ' + kFmt(Math.round(spent / woltRows.length))],
+    ['Отдали Wolt', kFmt(Math.round(spent)), 'средний тариф ' + kFmt(Math.round(spent / woltRows.length))],
+    ['Собрали с клиентов', kFmt(Math.round(collected)),
+     (collected - spent >= 0 ? 'доставка в плюс ' : 'доплатили ') + kFmt(Math.abs(Math.round(collected - spent)))],
     ['Отклонены', String(rejected.length), rejected.length ? kFmt(Math.round(rejected.reduce((s,w)=>s+w.fee,0))) + ' — проверьте счёт' : 'все доехали'],
     ['Нашли заказ', (pairs.length - nomatch.length) + ' из ' + pairs.length,
      !nomatch.length ? 'все сопоставлены'
@@ -2108,19 +2132,28 @@ function renderWolt() {
 
   const trow = p => {
     const w = p.w, o = p.o;
-    const share = o && o.sum ? Math.round(w.fee / o.sum * 100) : null;
+    const paid  = o ? delivPaid(o) : 0;            // сколько клиент отдал за доставку
+    const goods = o ? o.sum - paid : 0;            // заказ без доставки
+    const diff  = paid - w.fee;                    // плюс — доставка окупилась
     const bad = /отклон|отмен/i.test(w.status);
     return `<tr>
-      <td class="mo">#${w.num}</td>
-      <td>${ruDate(w.createdDate)} ${w.createdTime}<div style="font-size:10.5px;color:var(--text3);">${w.toAddr || '—'}${w.toTime ? ' · ' + w.toTime : ''}</div></td>
+      <td class="mo">#${w.num}<div style="font-size:10.5px;color:${bad ? 'var(--red)' : 'var(--text3)'};font-family:var(--font);">${w.status || '—'}</div></td>
+      <td style="font-size:11.5px;line-height:1.5;">
+        ${ruDate(w.createdDate)}
+        <div style="color:var(--text3);">создан ${w.createdTime}</div>
+        <div style="color:var(--text3);">${w.fromTime ? 'забрал ' + wAt(w.fromDate, w.fromTime, w.createdDate) : ''}${w.toTime ? ' · доставил ' + wAt(w.toDate, w.toTime, w.createdDate) : ''}</div>
+      </td>
+      <td style="font-size:11.5px;">${w.toAddr || '—'}<div style="font-size:10.5px;color:var(--text3);">из: ${w.fromAddr || '—'}</div></td>
       <td>${w.client || '—'}<div style="font-size:10.5px;color:var(--text3);" class="mo">${w.phoneRaw || ''}</div></td>
       <td class="mo" style="text-align:right;">${kFmt(Math.round(w.fee))}</td>
-      <td><span style="color:${bad ? 'var(--red)' : 'var(--text3)'};font-size:11.5px;">${w.status || '—'}</span></td>
+      <td class="mo" style="text-align:right;">${o ? kFmt(Math.round(paid)) +
+        `<div style="font-size:10.5px;color:${diff < 0 ? 'var(--red)' : 'var(--text3)'};">${diff >= 0 ? '+' : ''}${kFmt(Math.round(diff))}</div>` : '—'}</td>
+      <td class="mo" style="text-align:right;">${o ? kFmt(Math.round(goods)) +
+        `<div style="font-size:10.5px;color:var(--text3);">с доставкой ${kFmt(o.sum)}</div>` : '—'}</td>
       <td>${o ? `№${o.num} · ${shortName(o.oper || '—')}<div style="font-size:10.5px;color:var(--text3);">${ruDate(o.openDate)} ${(o.openTime||'').slice(0,5)}${o.uchDate > o.openDate ? ' · предзаказ на ' + ruDate(o.uchDate) : ''}</div>`
               : (w.createdDate < dMin || w.createdDate > dMax)
                 ? '<span style="color:var(--text3);">нет в загруженном 0080</span>'
                 : '<span style="color:var(--yellow);">заказ не найден</span>'}</td>
-      <td class="mo" style="text-align:right;">${o ? kFmt(o.sum) + (share !== null ? `<div style="font-size:10.5px;color:var(--text3);">доставка ${share}%</div>` : '') : '—'}</td>
     </tr>`;
   };
 
@@ -2128,8 +2161,11 @@ function renderWolt() {
     <div class="kpi-row" style="margin-bottom:12px;">${kpi}</div>
     <div class="tbl-wrap"><table class="tbl">
       <thead><tr>
-        <th>Wolt</th><th>Создано · куда</th><th>Получатель</th>
-        <th style="text-align:right;">Тариф</th><th>Статус</th><th>Заказ в iiko</th><th style="text-align:right;">Сумма заказа</th>
+        <th>Wolt</th><th>Когда</th><th>Маршрут</th><th>Получатель</th>
+        <th style="text-align:right;">Тариф Wolt</th>
+        <th style="text-align:right;">Клиент за доставку</th>
+        <th style="text-align:right;">Заказ без доставки</th>
+        <th>Заказ в iiko</th>
       </tr></thead>
       <tbody>${pairs.map(trow).join('')}</tbody>
     </table></div>
@@ -2141,9 +2177,174 @@ function renderWolt() {
     <div class="dt-foot" style="padding-left:0;">Сопоставление по телефону клиента; при нескольких заказах на один номер берётся ближайший по времени. Если пары нет — проверьте, тот ли период загружен в 0080.</div>`;
 }
 
+// ── Счёт Wolt за месяц ────────────────────────────
+// PDF «Отчёт о заказах»: одна запись занимает несколько строк, поэтому
+// опираемся на геометрию — дата открывает запись, «Всего» её закрывает.
+let wiRows = [];
+const RE_WIDATE = /^(\d{2})\.(\d{2})\.(\d{4})$/;
+const RE_WITIME = /^(\d{2}):(\d{2})$/;
+const RE_WIMONEY = /^-?[\d][\d\s ]*,\d{2}$/;
+
+async function parseWoltInvoice(file) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+  const rows = [];
+  let xRest = null, xUser = null;   // шапка есть не на каждой странице
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const content = await (await pdf.getPage(i)).getTextContent();
+    const items = content.items
+      .map(it => ({ s: String(it.str).replace(/[‎‏]/g, '').trim(),
+                    x: it.transform[4], y: Math.round(it.transform[5]) }))
+      .filter(o => o.s);
+    // Границы колонки «Ресторан» берём из шапки страницы
+    const h = n => { const e = items.find(o => o.s === n); return e ? e.x : null; };
+    xRest = h('Ресторан') ?? xRest; xUser = h('Пользователь') ?? xUser;
+
+    const dates = items.filter(o => RE_WIDATE.test(o.s)).sort((a,b) => b.y - a.y);
+    dates.forEach((d, k) => {
+      // Полоса записи — до середины расстояния до соседней даты: адрес
+      // переносится и вверх, и вниз от строки с датой.
+      const prevY = k ? dates[k-1].y : d.y + 60;
+      const nextY = k + 1 < dates.length ? dates[k+1].y : d.y - 60;
+      const top = (d.y + prevY) / 2, bot = (d.y + nextY) / 2;
+      const band = items.filter(o => o.y < top && o.y > bot);
+      // Разряды суммы приходят отдельными кусочками («1» и «658,42»),
+      // поэтому сначала собираем строку целиком, а уже потом ищем деньги.
+      const lines = {};
+      band.forEach(o => { (lines[o.y] = lines[o.y] || []).push(o); });
+      let total = 0, fee = 0, corr = 0;
+      const num = v => parseFloat(String(v).replace(/[\s\u00a0\u202f]/g,'').replace(',','.')) || 0;
+      Object.values(lines).forEach(arr => {
+        const txt = arr.sort((a,b) => a.x - b.x).map(o => o.s).join(' ');
+        const ms = txt.match(/-?\d[\d\s\u00a0\u202f]*,\d{2}/g);
+        // Колонки справа налево: Всего, Sale corrections, Чаевые, Стоимость доставки
+        if (ms && ms.length >= 4) {
+          const n = ms.length;
+          total = num(ms[n-1]); corr = num(ms[n-2]); fee = num(ms[n-4]);
+        }
+      });
+      const time = band.find(o => RE_WITIME.test(o.s));
+      const m = d.s.match(RE_WIDATE);
+      const rest = (xRest !== null && xUser !== null)
+        ? band.filter(o => o.x >= xRest - 6 && o.x < xUser - 6)
+              .sort((a,b) => b.y - a.y).map(o => o.s).join(' ').replace(/\s+/g,' ').trim()
+        : '';
+      rows.push({
+        date: `${m[3]}-${m[2]}-${m[1]}`,
+        time: time ? time.s : '',
+        rest,
+        total, fee, corr,
+        // Строки без стоимости доставки — это корректировки, а не поездки
+        kind: fee > 0 ? 'delivery' : 'correction'
+      });
+    });
+  }
+  return rows.sort((a,b) => (a.date + a.time) < (b.date + b.time) ? -1 : 1);
+}
+
+function initWoltInvoice() {
+  const f = document.getElementById('wiFile'); if (!f) return;
+  f.addEventListener('change', async e => {
+    const file = e.target.files[0]; if (!file) return;
+    const z = document.getElementById('wiZone'), b = document.getElementById('wiBadge');
+    z.className = 'upload-zone'; z.innerHTML = '<div style="font-size:22px;">⏳</div><div style="font-size:13px;">Читаю счёт…</div>';
+    try {
+      wiRows = await parseWoltInvoice(file);
+      if (!wiRows.length) throw new Error('Не нашла ни одной строки заказа');
+      const ds = [...new Set(wiRows.map(r => r.date))].sort();
+      const nd = wiRows.filter(r => r.kind === 'delivery').length;
+      const nc = wiRows.length - nd;
+      z.className = 'upload-zone done';
+      z.innerHTML = `<div style="font-size:22px;">✅</div><div style="font-size:13px;font-weight:700;">${file.name}</div>
+        <div style="font-size:11px;color:var(--green);margin-top:3px;">${nd} доставок${nc ? ' + ' + nc + ' корректировок' : ''} · ${ruDate(ds[0])} — ${ruDate(ds[ds.length-1])}</div>`;
+      b.textContent = kFmt(Math.round(wiRows.reduce((s,r) => s + r.total, 0)));
+      b.className = 'badge bg';
+      renderWoltInvoice();
+    } catch (err) {
+      wiRows = [];
+      z.className = 'upload-zone';
+      z.innerHTML = `<div style="font-size:22px;">❌</div><div style="font-size:13px;font-weight:700;">Не прочитался</div><div style="font-size:11px;color:var(--red);margin-top:4px;">${err.message}</div>`;
+    }
+  });
+}
+
+function renderWoltInvoice() {
+  const box = document.getElementById('wiResult');
+  if (!wiRows.length) { box.innerHTML = ''; return; }
+  const dels = wiRows.filter(r => r.kind === 'delivery');
+  const corrs = wiRows.filter(r => r.kind !== 'delivery');
+  const sum = wiRows.reduce((s,r) => s + r.total, 0);
+  const sumDel = dels.reduce((s,r) => s + r.total, 0);
+  const sumCorr = corrs.reduce((s,r) => s + r.total, 0);
+  const days = {}, rests = {};
+  dels.forEach(r => {
+    (days[r.date] = days[r.date] || { n:0, sum:0 }); days[r.date].n++; days[r.date].sum += r.total;
+    const key = r.rest || '— адрес не распознан';
+    (rests[key] = rests[key] || { n:0, sum:0 }); rests[key].n++; rests[key].sum += r.total;
+  });
+  const dayList = Object.keys(days).sort();
+
+  // Сверка с 0080: заказы с курьером Wolt за те же даты
+  const iikoByDay = {};
+  anOrders.filter(o => /wolt/i.test(o.courier || '')).forEach(o => {
+    iikoByDay[o.uchDate] = (iikoByDay[o.uchDate] || 0) + 1; });
+  const overlap = dayList.filter(d => d in iikoByDay);
+  const iikoN = overlap.reduce((s,d) => s + iikoByDay[d], 0);
+  const wiN   = overlap.reduce((s,d) => s + days[d].n, 0);
+
+  const allDates = [...new Set(wiRows.map(r => r.date))].sort();
+  const kpi = [
+    ['Сумма счёта', kFmt(Math.round(sum)), ruDate(allDates[0]) + ' — ' + ruDate(allDates[allDates.length-1])],
+    ['Доставок', String(dels.length), kFmt(Math.round(sumDel)) + ' · средний ' + kFmt(Math.round(sumDel / (dels.length||1)))],
+    ['Корректировки', String(corrs.length), corrs.length ? kFmt(Math.round(sumCorr)) + ' — проверьте, за что' : 'их нет'],
+    ['Самый дорогой день', kFmt(Math.round(Math.max(...dayList.map(d => days[d].sum)))),
+     ruDate(dayList.reduce((a,b) => days[a].sum > days[b].sum ? a : b))],
+    overlap.length
+      ? ['Сверка с 0080', wiN + ' / ' + iikoN, wiN === iikoN ? 'сходится за ' + overlap.length + ' дн.' : 'расхождение за ' + overlap.length + ' дн.']
+      : ['Сверка с 0080', '—', 'загрузите 0080 за этот же месяц']
+  ].map(([l,v,s]) => `<div class="kpi"><div class="kpi-label">${l}</div><div class="kpi-val">${v}</div><div class="kpi-sub">${s}</div></div>`).join('');
+
+  const dMax = Math.max(...dayList.map(d => days[d].sum));
+  const dayViz = '<div class="viz">' + dayList.map(d => {
+    const i = iikoByDay[d], n = days[d].n, bad = i !== undefined && i !== n;
+    return `<div class="viz-row" title="${dayLabel(d)}: ${n} доставок, ${kFmt(Math.round(days[d].sum))}">
+      <div class="viz-name">${dayLabel(d)}</div>
+      <div class="viz-track"><div class="viz-bar" style="width:${Math.max(2, days[d].sum/dMax*100)}%;background:${bad ? 'var(--yellow)' : VIZ.s1}"></div></div>
+      <div class="viz-num">${kFmt(Math.round(days[d].sum))}</div>
+    </div>
+    <div class="dt-foot" style="padding:0 0 4px 114px;">${n} доставок${i !== undefined
+      ? (bad ? ` · <span style="color:var(--yellow)">в 0080 заказов с Wolt: ${i}</span>` : ` · в 0080 столько же`) : ''}</div>`;
+  }).join('') + '</div>';
+
+  const rMax = Math.max(...Object.values(rests).map(r => r.sum));
+  const restViz = '<div class="viz">' + Object.entries(rests).sort((a,b) => b[1].sum - a[1].sum).map(([k,v]) => {
+    const code = branchesFromText(k);
+    return `<div class="viz-row">
+      <div class="viz-name" title="${k}">${code.length ? code[0] + ' · ' : ''}${k}</div>
+      <div class="viz-track"><div class="viz-bar" style="width:${Math.max(2, v.sum/rMax*100)}%;background:${VIZ.s3}"></div></div>
+      <div class="viz-num">${kFmt(Math.round(v.sum))}</div>
+    </div>
+    <div class="dt-foot" style="padding:0 0 4px 114px;">${v.n} доставок · средний тариф ${kFmt(Math.round(v.sum/v.n))}</div>`;
+  }).join('') + '</div>';
+
+  box.innerHTML = `
+    <div class="kpi-row" style="margin-bottom:12px;">${kpi}</div>
+    <div class="g2">
+      <div><div class="card-title" style="font-size:13px;margin-bottom:6px;">📅 По дням</div>${dayViz}</div>
+      <div><div class="card-title" style="font-size:13px;margin-bottom:6px;">🏬 Откуда забирали</div>${restViz}</div>
+    </div>
+    ${corrs.length ? `
+      <div class="dt-foot" style="padding-left:0;margin-top:10px;">
+        <b style="color:var(--yellow);">Строки без стоимости доставки — это корректировки Wolt (${corrs.length} на ${kFmt(Math.round(sumCorr))}):</b>
+        ${corrs.map(c => ruDate(c.date) + ' ' + c.time + ' — ' + kFmt(Math.round(c.total))).join(' · ')}
+      </div>` : ''}
+    <div class="dt-foot" style="padding-left:0;">Жёлтым — дни, где число доставок в счёте не совпало с числом заказов с курьером Wolt в 0080. Сравнение идёт по учётному дню заказа.</div>`;
+}
+
 function resetAnalytics() {
-  anOrders = []; anInvoices = []; woltRows = [];
-  ['anZone','anPrihodZone'].forEach(id => { const z = document.getElementById(id); if (z) z.className = 'upload-zone'; });
+  anOrders = []; anInvoices = []; woltRows = []; wiRows = [];
+  ['anZone','anPrihodZone','wiZone'].forEach(id => { const z = document.getElementById(id); if (z) z.className = 'upload-zone'; });
   location.hash = '#analytics'; location.reload();
 }
 
@@ -2434,6 +2635,7 @@ function renderAnalytics() {
   if (uch.includes(keep)) sel.value = keep;
   renderRetro();
   if (woltRows.length) renderWolt();
+  if (wiRows.length) renderWoltInvoice();
 }
 
 // Раскладывает позиции заказа по категориям и блюдам сразу в несколько корзин.
@@ -3012,6 +3214,7 @@ document.addEventListener('DOMContentLoaded', () => {
   goFromHash();
   initPrihodUpload();
   initAnalyticsUpload();
+  initWoltInvoice();
   const url = ls('scriptUrl');
   if(url && url !== 'undefined'){ document.getElementById('scriptUrl').value=url; updateConnBadge(true); }
   else if(url === 'undefined'){ localStorage.removeItem('scriptUrl'); }
