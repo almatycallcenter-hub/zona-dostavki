@@ -2245,6 +2245,10 @@ function renderWolt() {
   const wts = w => ts(w.createdDate, w.createdTime);
   const ots = o => ts(o.openDate, (o.openTime || '').slice(0,5));
   const isWoltOrder = o => /wolt/i.test(o.courier || '');
+  // Кандидатов ищем среди всех курьерских служб: бывает, что на кассу пробили
+  // Индрайвер или Яндекс, а по факту отправили через Wolt. Такие расхождения
+  // как раз и надо ловить, поэтому сужать список до Wolt нельзя.
+  const isCourierOrder = o => !isPickup(o) && !!String(o.courier || '').trim();
   const taken = new Set();
   const sorted = woltRows.slice().sort((a,b) => a.num < b.num ? -1 : 1);
 
@@ -2272,7 +2276,7 @@ function renderWolt() {
     if (p.o) return;
     const wa = addrKey(p.w.toAddr);
     if (!wa.street.length) return;
-    const cand = anOrders.filter(o => !taken.has(o) && isWoltOrder(o))
+    const cand = anOrders.filter(o => !taken.has(o) && isCourierOrder(o))
       .map(o => ({ o, m: addrMatch(wa, addrKey(o.addr)), gap: Math.abs(ots(o) - wts(p.w)) }))
       .filter(c => c.m && c.gap <= 2 * 864e5)
       .sort((a,b) => b.m - a.m || a.gap - b.gap);
@@ -2288,7 +2292,7 @@ function renderWolt() {
   pairs.forEach(p => {
     if (p.o) return;
     const nm = lat(p.w.client); if (nm.length < 4) return;
-    const cand = anOrders.filter(o => !taken.has(o) && isWoltOrder(o) && lat(o.client) === nm)
+    const cand = anOrders.filter(o => !taken.has(o) && isCourierOrder(o) && lat(o.client) === nm)
       .map(o => ({ o, gap: Math.abs(ots(o) - wts(p.w)) }))
       .filter(c => c.gap <= 2 * 864e5).sort((a,b) => a.gap - b.gap);
     if (cand.length === 1) { taken.add(cand[0].o); p.o = cand[0].o; p.via = 'имени'; }
@@ -2300,7 +2304,7 @@ function renderWolt() {
   pairs.forEach(p => {
     if (p.o) return;
     const br = isOurs(p.w.fromAddr);
-    const cand = anOrders.filter(o => !taken.has(o) && isWoltOrder(o)).map(o => {
+    const cand = anOrders.filter(o => !taken.has(o) && isCourierOrder(o)).map(o => {
       const gap = Math.abs(ots(o) - wts(p.w));
       if (gap > 864e5) return null;                       // не дальше суток
       const paid = delivPaid(o);
@@ -2319,7 +2323,7 @@ function renderWolt() {
   pairs.forEach(p => {
     if (p.o) return;
     const wa = addrKey(p.w.toAddr);
-    p.near = anOrders.filter(o => !taken.has(o) && isWoltOrder(o))
+    p.near = anOrders.filter(o => !taken.has(o) && isCourierOrder(o))
       .map(o => {
         const gap = Math.abs(ots(o) - wts(p.w));
         const m = addrMatch(wa, addrKey(o.addr));
@@ -2335,7 +2339,11 @@ function renderWolt() {
       .sort((a,b) => b.score - a.score).slice(0, 2);
   });
 
-  const orphanOrders = anOrders.filter(o => isWoltOrder(o) && !taken.has(o));
+  const orphanOrders = anOrders.filter(o => isCourierOrder(o) && !taken.has(o));
+  // Пара нашлась, но в 0080 записана другая служба — курьера вызвали не тем,
+  // кем пробили. Деньги за доставку в кассе тогда лежат не под тем курьером.
+  // Отклонённые доставки не в счёт: заказ тогда честно забрали самовывозом
+  const wrongCourier = pairs.filter(p => p.o && !isWoltOrder(p.o) && !/отклон|отмен/i.test(p.w.status));
   const spent   = woltRows.reduce((s, w) => s + w.fee, 0);
   // Что клиент заплатил за доставку — строка-услуга «Доставка …» в 0080
   const collected = pairs.reduce((s, p) => s + (p.o ? delivPaid(p.o) : 0), 0);
@@ -2366,18 +2374,25 @@ function renderWolt() {
        : (nomatch.length - outside) + ' без пары' + (outside ? ' · ' + outside + ' вне периода 0080' : '')
          + (byAddr ? ' · ' + byAddr + ' не по телефону' : '')
          + (nearN ? ' · ' + nearN + ' с подсказкой' : '')],
-    ['Заказы без Wolt', String(orphanOrders.length), 'курьер Wolt в 0080, доставки нет']
+    ['Заказы без Wolt', String(orphanOrders.length), 'курьерские заказы без пары в Wolt'],
+    ['Не та служба', String(wrongCourier.length),
+     wrongCourier.length ? 'везли Wolt, в 0080 другая служба' : 'служба везде совпала']
   ].map(([l,v,s]) => `<div class="kpi"><div class="kpi-label">${l}</div><div class="kpi-val">${v}</div><div class="kpi-sub">${s}</div></div>`).join('');
 
   // Выпадающий список свободных заказов с курьером Wolt — чтобы связать руками.
   // Сортируем по близости ко времени создания доставки: нужный обычно первый.
+  // Пробили одно, отправили другое. Отклонённые доставки не считаем ошибкой.
+  const courierTag = (w, o) => (isWoltOrder(o) || /отклон|отмен/i.test(w.status)) ? ''
+    : `<div><i class="tag-free" style="color:#8a1f1f;background:#ffe3e3;" title="Везли через Wolt, а в 0080 записано другое">${
+        isPickup(o) ? 'пробит самовывоз, а везли Wolt' : 'в 0080: ' + o.courier}</i></div>`;
+
   const linkPicker = (w, p) => {
     if (!orphanOrders.length) return '';
     const near = new Set((p.near || []).map(c => c.o.num));
     const opts = orphanOrders.slice()
       .sort((a, b) => Math.abs(ots(a) - wts(w)) - Math.abs(ots(b) - wts(w)))
       .map(o => `<option value="${o.num}">№${o.num} · ${ruDate(o.openDate)} ${(o.openTime||'').slice(0,5)} · ${
-        (o.client || '—')} · ${(o.addr || '—').slice(0, 34)} · ${kFmt(o.sum)}${near.has(o.num) ? '  ★' : ''}</option>`).join('');
+        o.courier || '—'} · ${(o.client || '—')} · ${(o.addr || '—').slice(0, 30)} · ${kFmt(o.sum)}${near.has(o.num) ? '  ★' : ''}</option>`).join('');
     return `<div style="margin-top:4px;"><select class="fi" style="width:100%;max-width:290px;padding:2px 6px;font-size:11px;"
       onchange="setWoltLink('${w.num}', this.value)">
       <option value="">— связать вручную —</option>${opts}</select></div>`;
@@ -2417,12 +2432,13 @@ function renderWolt() {
       <td>${o ? `№${o.num} · ${shortName(o.oper || '—')}<div style="font-size:10.5px;color:var(--text3);">${ruDate(o.openDate)} ${(o.openTime||'').slice(0,5)}${o.uchDate > o.openDate ? ' · предзаказ на ' + ruDate(o.uchDate) : ''}</div>${
                 p.via === 'вручную'
                   ? `<i class="tag-pre">связано вручную</i> <a href="#" onclick="setWoltLink('${w.num}','');return false;" style="font-size:10.5px;color:var(--text3);">убрать</a>`
-                  : p.via && p.via !== 'телефон' ? `<i class="tag-free" title="Телефоны не совпали — заказ оформил один человек, а привезли другому">по ${p.via} — проверьте</i>` : ''}`
+                  + courierTag(w, o)
+                  : p.via && p.via !== 'телефон' ? `<i class="tag-free" title="Телефоны не совпали — заказ оформил один человек, а привезли другому">по ${p.via} — проверьте</i>` : ''}${courierTag(w, o)}`
               : (w.createdDate < dMin || w.createdDate > dMax)
                 ? '<span style="color:var(--text3);">нет в загруженном 0080</span>'
                 : '<span style="color:var(--yellow);">заказ не найден</span>' +
                   ((p.near || []).length ? `<div style="font-size:10.5px;color:var(--text3);">похоже на ${
-                    p.near.map(c => `№${c.o.num} <span style="color:var(--text3);">(${
+                    p.near.map(c => `№${c.o.num}${isWoltOrder(c.o) ? '' : ' <span style="color:#8a1f1f;">' + c.o.courier + '</span>'} <span style="color:var(--text3);">(${
                       [c.m === 2 ? 'адрес' : c.m === 1 ? 'улица' : '', c.nameEq ? 'имя' : '',
                        c.brOk ? 'филиал' : '', c.feeOk ? 'сумма доставки' : ''].filter(Boolean).join(' + ')
                     })</span>`).join(', ')}</div>` : '') + linkPicker(w, p)}</td>
@@ -2460,7 +2476,7 @@ function renderQuality(pairs) {
   if (!box) return;
   const ops = {};
   const opBy = n => ops[n] = ops[n] || { label:n, n:0, wallet:0, walletN:0, late:0, lateMin:0,
-                                         missed:0, rows:[] };
+                                         missed:0, wrong:0, rows:[] };
   const op = o => opBy(shortName(o.oper || '— не указан'));
 
   // Кто был на смене в этот момент. Wolt пишет один общий аккаунт, поэтому
@@ -2480,6 +2496,11 @@ function renderQuality(pairs) {
     const w = p.w, o = p.o; if (!o) return;
     if (/отклон|отмен/i.test(w.status)) return;
     const e = op(o); e.n++;
+    // Пробили одну службу, отправили другой — деньги в кассе лягут не туда
+    if (!/wolt/i.test(o.courier || '')) { e.wrong++;
+      e.rows.push({ t:'не та служба',
+        txt:`№${o.num} · ` + (isPickup(o) ? 'пробит самовывоз' : `в 0080 «${o.courier || '—'}»`) + ', а везли Wolt',
+        val:'' }); }
     const paid = delivPaid(o), goods = o.sum - paid;
     const lim = freeFrom(o.openDate);
     if (goods < lim) {
@@ -2519,15 +2540,19 @@ function renderQuality(pairs) {
   }
   const totWallet = list.reduce((s,e) => s + e.wallet, 0);
   const totLate   = list.reduce((s,e) => s + e.late, 0);
-  bdg.textContent = (totWallet ? kFmt(Math.round(totWallet)) + ' · ' : '') + totLate + ' опозданий';
-  bdg.className = 'badge ' + (totWallet || totLate ? 'by' : 'bg');
+  const totWrong  = list.reduce((s,e) => s + e.wrong, 0);
+  bdg.textContent = (totWallet ? kFmt(Math.round(totWallet)) + ' · ' : '') + totLate + ' опозданий'
+    + (totWrong ? ' · ' + totWrong + ' не та служба' : '');
+  bdg.className = 'badge ' + (totWallet || totLate || totWrong ? 'by' : 'bg');
 
-  const TAG = { 'деньги':'var(--red)', 'опоздание':'var(--yellow)', 'самовывоз':'var(--a2)' };
+  const TAG = { 'деньги':'var(--red)', 'опоздание':'var(--yellow)', 'самовывоз':'var(--a2)',
+                'не та служба':'var(--red)' };
   box.innerHTML = `<div class="tbl-wrap"><table class="tbl">
     <thead><tr><th>Оператор</th>
       <th style="text-align:right;">Кошелёк</th>
       <th style="text-align:right;">Опоздания</th>
       <th style="text-align:right;">Упущенная доставка</th>
+      <th style="text-align:right;">Не та служба</th>
       <th>Заказов с Wolt</th></tr></thead>
     <tbody>${list.map(e => `
       <tr>
@@ -2537,15 +2562,16 @@ function renderQuality(pairs) {
         <td class="mo" style="text-align:right;color:${e.late ? 'var(--yellow)' : 'var(--text3)'};">${e.late}
           ${e.late ? `<div style="font-size:10.5px;color:var(--text3);font-family:var(--font);">в среднем +${Math.round(e.lateMin/e.late)} мин</div>` : ''}</td>
         <td class="mo" style="text-align:right;color:${e.missed ? 'var(--a2)' : 'var(--text3)'};">${e.missed}</td>
+        <td class="mo" style="text-align:right;color:${e.wrong ? 'var(--red)' : 'var(--text3)'};">${e.wrong}</td>
         <td class="mo">${e.n}</td>
       </tr>
-      ${e.rows.length ? `<tr><td colspan="5" style="padding:0 10px 8px 10px;">
+      ${e.rows.length ? `<tr><td colspan="6" style="padding:0 10px 8px 10px;">
         <details class="dt dt-leaf"><summary><div class="dt-dish"><span><span class="chev">▶</span> что именно</span><span>${e.rows.length}</span></div></summary>
         <div class="dt-days">${e.rows.map(r => `<div>
           <span><i class="tag-free" style="background:transparent;color:${TAG[r.t]};padding:0;">${r.t}</i> · ${r.txt}</span><span>${r.val}</span></div>`).join('')}</div>
         </details></td></tr>` : ''}`).join('')}</tbody>
   </table></div>
-  <div class="dt-foot" style="padding-left:0;">Кошелёк — разница между тарифом Wolt и тем, что оператор взял с клиента, и только по заказам, которые не дотянули до бесплатной доставки (до 02.09.2026 — от ${kFmt(17500)}, с 02.09.2026 — от ${kFmt(30000)}); он записывается на того, кто <b>принял заказ</b>. Опоздание — Wolt вручил позже планового времени из 0080; оно записывается на того, кто <b>вызвал курьера</b>: Wolt работает под одним общим аккаунтом, поэтому берём оператора, который в этот момент был на смене — принимал заказы.</div>`;
+  <div class="dt-foot" style="padding-left:0;">Кошелёк — разница между тарифом Wolt и тем, что оператор взял с клиента, и только по заказам, которые не дотянули до бесплатной доставки (до 02.09.2026 — от ${kFmt(17500)}, с 02.09.2026 — от ${kFmt(30000)}); он записывается на того, кто <b>принял заказ</b>. «Не та служба» — доставку везли через Wolt, а в 0080 пробита другая служба: деньги за доставку в кассе окажутся не под тем курьером. Опоздание — Wolt вручил позже планового времени из 0080; оно записывается на того, кто <b>вызвал курьера</b>: Wolt работает под одним общим аккаунтом, поэтому берём оператора, который в этот момент был на смене — принимал заказы.</div>`;
 }
 
 // ── Счёт Wolt за месяц ────────────────────────────
