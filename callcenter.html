@@ -906,6 +906,15 @@ details[open] > summary .chev { transform:rotate(90deg); }
 
       <div class="card">
         <div class="card-head">
+          <div><div class="card-title">🎯 Качество работы операторов</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px;">кошелёк по недобору за доставку, опоздания и упущенная бесплатная доставка. Считается по сопоставленным доставкам Wolt</div></div>
+          <span class="badge by" id="qBadge">Нет данных</span>
+        </div>
+        <div id="chartQuality" style="font-size:13px;color:var(--text3);">Вставьте список Wolt выше и нажмите «Сопоставить» — тогда посчитаем</div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
           <div><div class="card-title">🧾 Счёт Wolt за месяц</div>
           <div style="font-size:11px;color:var(--text3);margin-top:2px;">«Отчёт о заказах» — PDF, который Wolt присылает в начале следующего месяца. Разложим по дням и филиалам и сверим с заказами</div></div>
           <span class="badge by" id="wiBadge">Нет счёта</span>
@@ -1665,6 +1674,7 @@ function parsePrihodAoa(aoa) {
       cur.store = String(row[13] || '').trim();
       continue;
     }
+    if (/Покупатель:/.test(line)) { cur.buyer = String(row[15] || '').trim(); continue; }
     if (String(row[0] || '').trim() === '№' && /Товар/i.test(line)) { inTable = true; continue; }
     if (/^Итого/i.test(String(row[0] || '').trim())) { inTable = false; continue; }
     if (inTable && /^\d+$/.test(String(row[0] || '').trim())) {
@@ -2066,6 +2076,85 @@ function addrMatch(a, b) {
   if (!h1 || !h2 || h1 === '-' || h2 === '-') return 1;
   return (h1 === h2 || h1.startsWith(h2) || h2.startsWith(h1)) ? 2 : 0;
 }
+// ── Адреса филиалов ───────────────────────────────
+// Wolt пишет адреса как есть; чтобы понять, что это перемещение между нашими
+// точками, храним соответствие «адрес → код филиала». Что не узнали по
+// названию — оператор проставляет руками, выбор запоминается в браузере.
+let BRANCH_ADDR = {};
+function loadBranchAddr() {
+  try { BRANCH_ADDR = JSON.parse(localStorage.getItem('branchAddr') || '{}'); }
+  catch (e) { BRANCH_ADDR = {}; }
+}
+const addrId = a => String(a || '').toLowerCase().replace(/\s+/g, ' ').trim();
+// '' — адрес ещё не разметили, '-' — оператор сказал «не наш», ТТх — филиал
+function branchOfAddr(a) {
+  const id = addrId(a); if (!id) return '';
+  if (BRANCH_ADDR[id]) return BRANCH_ADDR[id];
+  const auto = branchesFromText(a);          // «Сарыарка», «Ньютона», «Бесагаш»…
+  return auto.length === 1 ? auto[0] : '';
+}
+const isOurs = a => { const c = branchOfAddr(a); return c && c !== '-' ? c : ''; };
+function setBranchAddr(a, code) {
+  const id = addrId(a);
+  if (code) BRANCH_ADDR[id] = code; else delete BRANCH_ADDR[id];
+  try { localStorage.setItem('branchAddr', JSON.stringify(BRANCH_ADDR)); } catch (e) {}
+  renderWolt();
+}
+
+// Список адресов из выгрузки Wolt с выбором филиала — то, что не узналось
+// по названию, оператор помечает сам, и дальше это работает автоматически.
+function branchAddrBlock() {
+  const seen = new Map();
+  const bump = (a, isFrom) => { if (!a) return; const id = addrId(a);
+    const e = seen.get(id) || { a, from:0, to:0 }; e[isFrom ? 'from' : 'to']++; seen.set(id, e); };
+  woltRows.forEach(w => { bump(w.fromAddr, true); bump(w.toAddr, false); });
+  // Сначала — точки забора, которые ещё не размечены: они решают тип доставки
+  const list = [...seen.values()].sort((x, y) =>
+    (branchOfAddr(x.a) ? 1 : 0) - (branchOfAddr(y.a) ? 1 : 0) || y.from - x.from || (x.a < y.a ? -1 : 1));
+  if (!list.length) return '';
+  const opts = c => [['', '— выбрать'], ['-', 'не наш адрес'], ...BRANCHES.map(b => [b.code, b.code])]
+    .map(([v, l]) => `<option value="${v}"${v === c ? ' selected' : ''}>${l}</option>`).join('');
+  const known = list.filter(x => branchOfAddr(x.a)).length;
+  return `<details class="dt" style="margin-top:10px;"${known < list.length ? ' open' : ''}>
+    <summary><div class="dt-head"><span class="chev">▶</span><b>Адреса и филиалы</b>
+      <span class="dt-tot">${known} из ${list.length} размечено</span></div></summary>
+    <div class="dt-body"><div class="dt-days" style="padding-left:0;">
+      ${list.map(x => `<div><span>${x.a}${x.from ? ` <i class="tag-pre">забор ×${x.from}</i>` : ''}</span>
+        <select class="fi" style="width:auto;min-width:120px;padding:2px 6px;font-size:11px;"
+                onchange="setBranchAddr(this.dataset.a, this.value)" data-a="${x.a.replace(/"/g,'&quot;')}">${opts(branchOfAddr(x.a))}</select></div>`).join('')}
+    </div>
+    <div class="dt-foot" style="padding-left:0;">Если обе точки маршрута — наши филиалы, доставка считается перемещением, и к ней подтягивается накладная за этот день. Если забор не с нашей точки — это сторонний забор, скорее всего корпоративный заказ.</div>
+    </div></details>`;
+}
+
+// Тип доставки. Порядок важен: перемещение и сторонний забор определяются
+// по адресам, платно/бесплатно — только по самому заказу.
+function woltKind(w, o) {
+  const a = isOurs(w.fromAddr), b = isOurs(w.toAddr);
+  if (a && b) return { t: 'перемещение', from: a, to: b, color: 'var(--a2)' };
+  if (branchOfAddr(w.fromAddr) === '-') return { t: 'сторонний забор', color: 'var(--yellow)' };
+  if (!a)     return { t: 'адрес не размечен', color: 'var(--text3)', ask: true };
+  if (!o)     return { t: 'не определён', color: 'var(--text3)' };
+  return goodsSum(o) >= freeFrom(o.openDate)
+    ? { t: 'бесплатная', color: 'var(--green)' }
+    : { t: 'платная', color: 'var(--text3)' };
+}
+
+// Накладная под перемещение: те же два филиала, тот же день
+function invoiceForMove(k, w) {
+  const days = [w.createdDate, w.fromDate, w.toDate].filter(Boolean);
+  return anInvoices.find(i => {
+    if (!days.includes(i.date)) return false;
+    const from = branchesFromText(i.supplier), to = branchesFromText(i.buyer || '');
+    return from.includes(k.from) && to.includes(k.to);
+  }) || anInvoices.find(i => {          // бывает, что накладную выписали обратной стороной
+    if (!days.includes(i.date)) return false;
+    const from = branchesFromText(i.supplier), to = branchesFromText(i.buyer || '');
+    return from.includes(k.to) && to.includes(k.from);
+  }) || null;
+}
+const invSum = i => (i.items || []).reduce((s, it) => s + (it.sum || 0), 0);
+
 const delivPaid = o => (o.items || [])
   .filter(it => /достав/i.test(it.dish || '')).reduce((s, it) => s + (it.sum || 0), 0);
 
@@ -2156,6 +2245,13 @@ function renderWolt() {
   const spent   = woltRows.reduce((s, w) => s + w.fee, 0);
   // Что клиент заплатил за доставку — строка-услуга «Доставка …» в 0080
   const collected = pairs.reduce((s, p) => s + (p.o ? delivPaid(p.o) : 0), 0);
+  // Недобор считаем только там, где доставка не была бесплатной по правилу
+  const shortfall = pairs.reduce((s, p) => {
+    if (!p.o || /отклон|отмен/i.test(p.w.status)) return s;
+    const paid = delivPaid(p.o);
+    if (p.o.sum - paid >= freeFrom(p.o.openDate)) return s;
+    return s + Math.min(0, paid - p.w.fee);
+  }, 0);
   const rejected = woltRows.filter(w => /отклон|отмен/i.test(w.status));
   const nomatch  = pairs.filter(p => !p.o);
   const byAddr   = pairs.filter(p => p.via && p.via !== 'телефон').length;
@@ -2168,7 +2264,7 @@ function renderWolt() {
     ['Доставок Wolt', String(woltRows.length), ''],
     ['Отдали Wolt', kFmt(Math.round(spent)), 'средний тариф ' + kFmt(Math.round(spent / woltRows.length))],
     ['Собрали с клиентов', kFmt(Math.round(collected)),
-     (collected - spent >= 0 ? 'доставка в плюс ' : 'доплатили ') + kFmt(Math.abs(Math.round(collected - spent)))],
+     shortfall ? 'недобор операторов ' + kFmt(Math.round(-shortfall)) : 'недобора нет'],
     ['Отклонены', String(rejected.length), rejected.length ? kFmt(Math.round(rejected.reduce((s,w)=>s+w.fee,0))) + ' — проверьте счёт' : 'все доехали'],
     ['Нашли заказ', (pairs.length - nomatch.length) + ' из ' + pairs.length,
      !nomatch.length ? (byAddr ? byAddr + ' по адресу' : 'все сопоставлены')
@@ -2181,10 +2277,20 @@ function renderWolt() {
     const w = p.w, o = p.o;
     const paid  = o ? delivPaid(o) : 0;            // сколько клиент отдал за доставку
     const goods = o ? o.sum - paid : 0;            // заказ без доставки
-    const diff  = paid - w.fee;                    // плюс — доставка окупилась
+    const free  = o && goods >= freeFrom(o.openDate);   // по правилу доставка бесплатна
+    // Если заказ дотянул до порога, тариф Wolt — это наши расходы, а не недобор
+    const diff  = o ? (free ? 0 : paid - w.fee) : 0;
     const bad = /отклон|отмен/i.test(w.status);
+    const k = woltKind(w, o);
+    const inv = k.t === 'перемещение' ? invoiceForMove(k, w) : null;
     return `<tr>
       <td class="mo">#${w.num}<div style="font-size:10.5px;color:${bad ? 'var(--red)' : 'var(--text3)'};font-family:var(--font);">${w.status || '—'}</div></td>
+      <td style="font-size:11.5px;"><span style="color:${k.color};font-weight:600;">${k.t}</span>
+        ${k.t === 'перемещение' ? `<div style="font-size:10.5px;color:var(--text3);">${k.from} → ${k.to}</div>` +
+            (inv ? `<div style="font-size:10.5px;color:var(--text3);">накл. №${inv.num} · ${kFmt(Math.round(invSum(inv)))}<br>${(inv.items||[]).slice(0,3).map(it => it.name + ' ×' + qFmt(it.qty)).join(', ')}${(inv.items||[]).length > 3 ? '…' : ''}</div>`
+                : `<div style="font-size:10.5px;color:var(--yellow);">накладная не найдена</div>`) : ''}
+        ${k.t === 'сторонний забор' ? `<div style="font-size:10.5px;color:var(--text3);">забор не с нашей точки — похоже на корпоративный</div>` : ''}
+        ${k.ask ? `<div style="font-size:10.5px;color:var(--text3);">отметьте точку забора ниже</div>` : ''}</td>
       <td style="font-size:11.5px;line-height:1.5;">
         ${ruDate(w.createdDate)}
         <div style="color:var(--text3);">создан ${w.createdTime}</div>
@@ -2194,7 +2300,8 @@ function renderWolt() {
       <td>${w.client || '—'}<div style="font-size:10.5px;color:var(--text3);" class="mo">${w.phoneRaw || ''}</div></td>
       <td class="mo" style="text-align:right;">${kFmt(Math.round(w.fee))}</td>
       <td class="mo" style="text-align:right;">${o ? kFmt(Math.round(paid)) +
-        `<div style="font-size:10.5px;color:${diff < 0 ? 'var(--red)' : 'var(--text3)'};">${diff >= 0 ? '+' : ''}${kFmt(Math.round(diff))}</div>` : '—'}</td>
+        (free ? `<div style="font-size:10.5px;color:var(--green);font-family:var(--font);">бесплатно от ${kFmt(freeFrom(o.openDate))}</div>`
+              : `<div style="font-size:10.5px;color:${diff < 0 ? 'var(--red)' : 'var(--text3)'};">${diff >= 0 ? '+' : ''}${kFmt(Math.round(diff))}</div>`) : '—'}</td>
       <td class="mo" style="text-align:right;">${o ? kFmt(Math.round(goods)) +
         `<div style="font-size:10.5px;color:var(--text3);">с доставкой ${kFmt(o.sum)}</div>` : '—'}</td>
       <td>${o ? `№${o.num} · ${shortName(o.oper || '—')}<div style="font-size:10.5px;color:var(--text3);">${ruDate(o.openDate)} ${(o.openTime||'').slice(0,5)}${o.uchDate > o.openDate ? ' · предзаказ на ' + ruDate(o.uchDate) : ''}</div>${p.via && p.via !== 'телефон' ? `<i class="tag-free" title="Телефоны не совпали — заказ оформил один человек, а привезли другому">по ${p.via} — проверьте</i>` : ''}`
@@ -2208,7 +2315,7 @@ function renderWolt() {
     <div class="kpi-row" style="margin-bottom:12px;">${kpi}</div>
     <div class="tbl-wrap"><table class="tbl">
       <thead><tr>
-        <th>Wolt</th><th>Когда</th><th>Маршрут</th><th>Получатель</th>
+        <th>Wolt</th><th>Тип</th><th>Когда</th><th>Маршрут</th><th>Получатель</th>
         <th style="text-align:right;">Тариф Wolt</th>
         <th style="text-align:right;">Клиент за доставку</th>
         <th style="text-align:right;">Заказ без доставки</th>
@@ -2221,7 +2328,106 @@ function renderWolt() {
         <b style="color:var(--yellow);">Заказы с курьером Wolt, для которых доставка не нашлась (${orphanOrders.length}):</b>
         ${orphanOrders.map(o => '№' + o.num + ' от ' + ruDate(o.openDate) + (o.phone ? ' · ' + o.phone : '')).join(' · ')}
       </div>` : ''}
-    <div class="dt-foot" style="padding-left:0;">Сопоставление по телефону клиента; при нескольких заказах на один номер берётся ближайший по времени. Если пары нет — проверьте, тот ли период загружен в 0080.</div>`;
+    ${branchAddrBlock()}
+    <div class="dt-foot" style="padding-left:0;">Сопоставление по телефону клиента, затем по адресу доставки. Если пары нет — проверьте, тот ли период загружен в 0080.</div>`;
+
+  renderQuality(pairs);
+}
+
+// ── Качество работы операторов ────────────────────
+// Три вещи, за которые отвечает оператор: правильно ли взял деньги за
+// доставку, успел ли к обещанному времени, предложил ли бесплатную доставку.
+function renderQuality(pairs) {
+  const box = document.getElementById('chartQuality'), bdg = document.getElementById('qBadge');
+  if (!box) return;
+  const ops = {};
+  const opBy = n => ops[n] = ops[n] || { label:n, n:0, wallet:0, walletN:0, late:0, lateMin:0,
+                                         missed:0, rows:[] };
+  const op = o => opBy(shortName(o.oper || '— не указан'));
+
+  // Кто был на смене в этот момент. Wolt пишет один общий аккаунт, поэтому
+  // «кто заказал курьера» определяем по тому, кто в это время принимал заказы.
+  const shiftAt = (date, time) => {
+    const t = new Date(date + 'T' + (time || '12:00') + ':00Z').getTime();
+    let best = null, bestGap = Infinity;
+    anOrders.forEach(o => {
+      if (o.openDate !== date || !o.oper) return;
+      const g = Math.abs(new Date(o.openDate + 'T' + (o.openTime || '12:00:00') + 'Z').getTime() - t);
+      if (g < bestGap) { bestGap = g; best = o.oper; }
+    });
+    return best ? shortName(best) : '';
+  };
+
+  pairs.forEach(p => {
+    const w = p.w, o = p.o; if (!o) return;
+    if (/отклон|отмен/i.test(w.status)) return;
+    const e = op(o); e.n++;
+    const paid = delivPaid(o), goods = o.sum - paid;
+    const lim = freeFrom(o.openDate);
+    if (goods < lim) {
+      const d = paid - w.fee;
+      if (d < 0) { e.wallet += d; e.walletN++;
+        e.rows.push({ t:'деньги', txt:`№${o.num} · тариф ${kFmt(Math.round(w.fee))}, взяли ${kFmt(Math.round(paid))}`,
+                      val:kFmt(Math.round(d)) }); }
+    }
+    // Опоздание: обещали одно время, Wolt вручил позже. Отвечает не тот, кто
+    // принял заказ, а тот, кто вызвал курьера — то есть кто был на смене,
+    // когда доставку создали в Wolt.
+    if (o.planDT && w.toDate && w.toTime) {
+      const plan = new Date(o.planDT.replace(' ', 'T') + 'Z').getTime();
+      const fact = new Date(w.toDate + 'T' + w.toTime + ':00Z').getTime();
+      const min = Math.round((fact - plan) / 60000);
+      if (min > 0) {
+        const who = shiftAt(w.createdDate, w.createdTime) || shortName(o.oper || '— не указан');
+        const le = opBy(who); le.late++; le.lateMin += min;
+        le.rows.push({ t:'опоздание',
+          txt:`№${o.num} · обещали ${dtTime(o.planDT).slice(0,5)}, вручили ${w.toTime}` +
+              ` · курьер вызван ${ruDate(w.createdDate)} ${w.createdTime}` +
+              (who !== shortName(o.oper || '') ? `, заказ принимала ${shortName(o.oper || '—')}` : ''),
+          val:'+' + min + ' мин' });
+      }
+    }
+  });
+
+  // Упущенная бесплатная доставка — самовывоз на сумму от порога
+  anOrders.filter(freeMiss).forEach(o => { const e = op(o); e.missed++;
+    e.rows.push({ t:'самовывоз', txt:`№${o.num} · ${kFmt(goodsSum(o))} — доставка была бы бесплатной`, val:'' }); });
+
+  const list = Object.values(ops).filter(e => e.n || e.rows.length)
+    .sort((a,b) => (a.wallet - a.lateMin) - (b.wallet - b.lateMin));
+  if (!list.length) {
+    box.innerHTML = 'Вставьте список Wolt выше и нажмите «Сопоставить» — тогда посчитаем';
+    bdg.textContent = 'Нет данных'; bdg.className = 'badge by'; return;
+  }
+  const totWallet = list.reduce((s,e) => s + e.wallet, 0);
+  const totLate   = list.reduce((s,e) => s + e.late, 0);
+  bdg.textContent = (totWallet ? kFmt(Math.round(totWallet)) + ' · ' : '') + totLate + ' опозданий';
+  bdg.className = 'badge ' + (totWallet || totLate ? 'by' : 'bg');
+
+  const TAG = { 'деньги':'var(--red)', 'опоздание':'var(--yellow)', 'самовывоз':'var(--a2)' };
+  box.innerHTML = `<div class="tbl-wrap"><table class="tbl">
+    <thead><tr><th>Оператор</th>
+      <th style="text-align:right;">Кошелёк</th>
+      <th style="text-align:right;">Опоздания</th>
+      <th style="text-align:right;">Упущенная доставка</th>
+      <th>Заказов с Wolt</th></tr></thead>
+    <tbody>${list.map(e => `
+      <tr>
+        <td><b>${e.label}</b></td>
+        <td class="mo" style="text-align:right;color:${e.wallet ? 'var(--red)' : 'var(--text3)'};">${e.wallet ? kFmt(Math.round(e.wallet)) : '0 ₸'}
+          ${e.walletN ? `<div style="font-size:10.5px;color:var(--text3);font-family:var(--font);">${plural(e.walletN,'случай','случая','случаев')}</div>` : ''}</td>
+        <td class="mo" style="text-align:right;color:${e.late ? 'var(--yellow)' : 'var(--text3)'};">${e.late}
+          ${e.late ? `<div style="font-size:10.5px;color:var(--text3);font-family:var(--font);">в среднем +${Math.round(e.lateMin/e.late)} мин</div>` : ''}</td>
+        <td class="mo" style="text-align:right;color:${e.missed ? 'var(--a2)' : 'var(--text3)'};">${e.missed}</td>
+        <td class="mo">${e.n}</td>
+      </tr>
+      ${e.rows.length ? `<tr><td colspan="5" style="padding:0 10px 8px 10px;">
+        <details class="dt dt-leaf"><summary><div class="dt-dish"><span><span class="chev">▶</span> что именно</span><span>${e.rows.length}</span></div></summary>
+        <div class="dt-days">${e.rows.map(r => `<div>
+          <span><i class="tag-free" style="background:transparent;color:${TAG[r.t]};padding:0;">${r.t}</i> · ${r.txt}</span><span>${r.val}</span></div>`).join('')}</div>
+        </details></td></tr>` : ''}`).join('')}</tbody>
+  </table></div>
+  <div class="dt-foot" style="padding-left:0;">Кошелёк — разница между тарифом Wolt и тем, что оператор взял с клиента, и только по заказам, которые не дотянули до бесплатной доставки (до 02.09.2026 — от ${kFmt(17500)}, с 02.09.2026 — от ${kFmt(30000)}); он записывается на того, кто <b>принял заказ</b>. Опоздание — Wolt вручил позже планового времени из 0080; оно записывается на того, кто <b>вызвал курьера</b>: Wolt работает под одним общим аккаунтом, поэтому берём оператора, который в этот момент был на смене — принимал заказы.</div>`;
 }
 
 // ── Счёт Wolt за месяц ────────────────────────────
@@ -2527,7 +2733,7 @@ function renderAnalytics() {
       : ['Отобрано', rows.length + ' из ' + anOrders.length, anType === 'pre' ? 'только предзаказы' : 'только дневные'],
     ['Самовывоз', pickup + ' шт', Math.round(pickup / rows.length * 100) + '% заказов'],
     ['Упущенная доставка', rows.filter(freeMiss).length + ' шт',
-     'самовывоз от ' + kFmt(FREE_DELIVERY_FROM) + ' — доставка бесплатная']
+     'самовывоз на сумму от порога — доставка бесплатная']
   ].map(([l, v, s]) => `<div class="kpi"><div class="kpi-label">${l}</div><div class="kpi-val">${v}</div><div class="kpi-sub">${s}</div></div>`).join('');
 
   // ── Выручка по операторам, с раскрытием по дням ──
@@ -2727,11 +2933,19 @@ function buildGroups(rows, keyFn) {
 
 // Доставка бесплатна от этой суммы. Самовывоз на такой чек — упущенная
 // возможность: клиенту можно было предложить привезти, и это ничего не стоит.
-const FREE_DELIVERY_FROM = 30000;
+// Порог бесплатной доставки менялся: до 02.09.2026 — от 17 500, с 02.09 — от 30 000.
+// Правила идут от новых к старым; чтобы добавить новое, впишите строку сверху.
+const FREE_RULES = [
+  { from: '2026-09-02', min: 30000 },
+  { from: '0000-00-00', min: 17500 }
+];
+const freeFrom = d => (FREE_RULES.find(r => String(d || '') >= r.from) || { min: Infinity }).min;
 const plural = (n, one, few, many) => n + ' ' +
   (n % 10 === 1 && n % 100 !== 11 ? one
    : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? few : many);
-const freeMiss = o => isPickup(o) && o.sum >= FREE_DELIVERY_FROM;
+// Сумма без услуги доставки — именно она сравнивается с порогом
+const goodsSum = o => o.sum - delivPaid(o);
+const freeMiss = o => isPickup(o) && goodsSum(o) >= freeFrom(o.openDate);
 
 // Строка заказа: кто принял, когда принял, на какое время обещали
 function orderLine(o) {
@@ -2742,7 +2956,7 @@ function orderLine(o) {
   const meta = [o.oper ? shortName(o.oper) : '— оператор не указан',
                 'принят ' + (o.openTime || '').slice(0,5), plan].join(' · ');
   return `<div>
-    <span>№${o.num || '—'} · ${dayLabel(anDate(o))}${o.client ? ' · ' + o.client : ''}${isPre(o) ? ' <i class="tag-pre">предзаказ</i>' : ''}${freeMiss(o) ? ' <i class="tag-free" title="Чек от ' + kFmt(FREE_DELIVERY_FROM) + ' — доставку можно было предложить бесплатно">бесплатная доставка</i>' : ''}
+    <span>№${o.num || '—'} · ${dayLabel(anDate(o))}${o.client ? ' · ' + o.client : ''}${isPre(o) ? ' <i class="tag-pre">предзаказ</i>' : ''}${freeMiss(o) ? ' <i class="tag-free" title="Чек от ' + kFmt(freeFrom(o.openDate)) + ' — доставку можно было предложить бесплатно">бесплатная доставка</i>' : ''}
       <br><i class="ord-meta">${meta}</i></span>
     <span>${kFmt(oSum(o))}</span></div>`;
 }
@@ -2763,7 +2977,7 @@ function groupBlock(groups, color) {
       <div class="dt-body">
         <div class="dt-foot">${kFmt(Math.round(g.sum))} · средний чек ${kFmt(Math.round(g.sum/g.n))} · предзаказов ${g.pre}${
           (() => { const m = g.orders.filter(freeMiss); return m.length
-            ? ` · <span style="color:var(--yellow)">${plural(m.length, 'самовывоз', 'самовывоза', 'самовывозов')} от ${kFmt(FREE_DELIVERY_FROM)} — доставка была бы бесплатной</span>` : ''; })()}</div>
+            ? ` · <span style="color:var(--yellow)">${plural(m.length, 'самовывоз', 'самовывоза', 'самовывозов')} на сумму от порога — доставка была бы бесплатной</span>` : ''; })()}</div>
         ${catBlock(g.cats)}
         <details class="dt dt-leaf">
           <summary><div class="dt-dish"><span><span class="chev">▶</span> Заказы</span><span>${g.orders.length}</span></div></summary>
@@ -3262,6 +3476,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initPrihodUpload();
   initAnalyticsUpload();
   initWoltInvoice();
+  loadBranchAddr();
   const url = ls('scriptUrl');
   if(url && url !== 'undefined'){ document.getElementById('scriptUrl').value=url; updateConnBadge(true); }
   else if(url === 'undefined'){ localStorage.removeItem('scriptUrl'); }
