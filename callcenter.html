@@ -446,6 +446,9 @@ details[open] > summary .chev { transform:rotate(90deg); }
     <button class="nav-item" onclick="go('analytics')">
       <span class="icon">📈</span> Аналитика
     </button>
+    <button class="nav-item" onclick="go('kpi')">
+      <span class="icon">🎯</span> KPI
+    </button>
     <div class="sb-section">Производство</div>
     <button class="nav-item" onclick="openApp('calc')">
       <span class="icon">🗺️</span> Калькулятор
@@ -752,6 +755,65 @@ details[open] > summary .chev { transform:rotate(90deg); }
 
 
 <!-- АНАЛИТИКА ─────────────────────────── -->
+<!-- KPI ─────────────────────────────────── -->
+<div class="page" id="page-kpi">
+  <div class="page-header">
+    <div><div class="page-title">🎯 KPI операторов</div>
+    <div class="page-sub">нарушения из 0080 и Wolt · премия по сменам и за месяц</div></div>
+    <button class="btn btn-o btn-sm" onclick="go('analytics')">📈 Загрузить отчёты</button>
+  </div>
+  <div class="page-body">
+
+    <div class="card">
+      <div class="card-head">
+        <div><div class="card-title">⚙️ Ставки и пороги</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px;">блок оплачивается полностью, если нарушений не больше первого порога, вполовину — если не больше второго, иначе ноль</div></div>
+        <span class="badge ba" id="kpiRateBadge"></span>
+      </div>
+      <div class="tbl-wrap"><table class="tbl">
+        <thead><tr><th>Блок</th><th style="text-align:right;">Ставка за смену, ₸</th>
+          <th style="text-align:right;">Полностью при ≤</th><th style="text-align:right;">Половина при ≤</th></tr></thead>
+        <tbody id="kpiRates"></tbody>
+      </table></div>
+      <div class="dt-foot" style="padding-left:0;">Кассовый отчёт не отправлен → дисциплина смены обнуляется целиком. Значения сохраняются в браузере.</div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div><div class="card-title">🔍 Что нашлось автоматически</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px;">по загруженным в Аналитике 0080 и списку Wolt. Нажмите на строку — покажет заказы</div></div>
+        <span class="badge by" id="kpiFoundBadge">Нет данных</span>
+      </div>
+      <div class="txn-filters" style="align-items:center;margin-bottom:10px;">
+        <span style="font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.6px;margin-right:4px;">Регламент применять к</span>
+        <div class="filter-pill active" id="rs-pre" onclick="setReglScope('pre',this)">предзаказам</div>
+        <div class="filter-pill" id="rs-all" onclick="setReglScope('all',this)">всем заказам</div>
+        <span style="font-size:11px;color:var(--text3);margin-left:6px;">регламент написан под предзаказы: время рейса проверяется там, где заказ принят на другой день</span>
+      </div>
+      <div id="kpiChecks" style="font-size:13px;color:var(--text3);">Загрузите отчёт 0080 в разделе «Аналитика» — нарушения посчитаются сами</div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div><div class="card-title">📋 Смены</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px;">смена = день, в который оператор принимал заказы</div></div>
+        <span class="badge ba" id="kpiShiftBadge"></span>
+      </div>
+      <div id="kpiShifts"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div><div class="card-title">🏁 Итог за период</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px;">премия за план продаж отмечается вручную</div></div>
+        <button class="btn btn-o btn-sm" onclick="exportKpi()">⬇️ Выгрузить для KPI.xlsx</button>
+      </div>
+      <div id="kpiTotal"></div>
+    </div>
+
+  </div>
+</div>
+
 <div class="page" id="page-analytics">
   <div class="page-header">
     <div><div class="page-title">📈 Аналитика</div><div class="page-sub">0080 за период · операторы, блюда, филиалы</div></div>
@@ -783,6 +845,17 @@ details[open] > summary .chev { transform:rotate(90deg); }
           <input type="file" id="anPrihodFile" accept=".xls,.xlsx" style="display:none;">
         </div>
       </div>
+      <div class="txn-filters" style="align-items:center;margin-top:12px;">
+        <span style="font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.6px;margin-right:4px;">Облако</span>
+        <select class="fi" id="sbDatasets" style="width:auto;min-width:260px;padding:3px 8px;font-size:12px;"
+                onchange="sbLoadDataset(this.value)">
+          <option value="">— подключите Supabase в Настройках —</option>
+        </select>
+        <button class="btn btn-o btn-sm" onclick="sbSaveDataset('orders', anOrders, '0080')">☁️ Сохранить 0080</button>
+        <button class="btn btn-o btn-sm" onclick="sbSaveDataset('wolt', woltRows, 'Wolt')">☁️ Сохранить Wolt</button>
+        <button class="btn btn-o btn-sm" onclick="sbSaveDataset('invoices', anInvoices, 'Накладные')">☁️ Сохранить накладные</button>
+      </div>
+      <div class="dt-foot" style="padding-left:0;">Сохранённые отчёты видны с любого ноутбука после входа — файлы заново загружать не нужно.</div>
     </div>
 
     <div id="anContent" style="display:none;">
@@ -914,6 +987,15 @@ details[open] > summary .chev { transform:rotate(90deg); }
       </div>
 
       <div class="card">
+        <div class="card-head" style="flex-wrap:wrap;gap:8px;">
+          <div><div class="card-title">🚕 Яндекс и Индрайвер — чеки из телеграм-бота</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px;">чеки, присланные боту, сводятся с заказами: сначала по № заказа, потом по службе, дню и сумме</div></div>
+          <button class="btn btn-o btn-sm" onclick="loadReceipts()">↻ Обновить</button>
+        </div>
+        <div id="rcResult" style="font-size:13px;color:var(--text3);">Подключите Supabase в ⚙️ Настройках — чеки подтянутся сюда</div>
+      </div>
+
+      <div class="card">
         <div class="card-head">
           <div><div class="card-title">🧾 Счёт Wolt за месяц</div>
           <div style="font-size:11px;color:var(--text3);margin-top:2px;">«Отчёт о заказах» — PDF, который Wolt присылает в начале следующего месяца. Разложим по дням и филиалам и сверим с заказами</div></div>
@@ -971,6 +1053,30 @@ details[open] > summary .chev { transform:rotate(90deg); }
         </div>
       </div>
       <div id="connResult" style="font-size:13px;"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div><div class="card-title">☁️ Общий доступ (Supabase)</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px;">настройки, разметка адресов и загруженные отчёты становятся общими — их видно с любого ноутбука после входа</div></div>
+        <span class="badge by" id="sbBadge">Не подключено</span>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px;">
+        <div class="fg" style="flex:1;min-width:240px;"><label class="fl">URL проекта</label>
+          <input class="fi" type="text" id="sbUrl" placeholder="https://xxxx.supabase.co"></div>
+        <div class="fg" style="flex:1;min-width:240px;"><label class="fl">Anon key (publishable)</label>
+          <input class="fi" type="text" id="sbKey" placeholder="eyJhbGci…"></div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+        <div class="fg"><label class="fl">Почта</label>
+          <input class="fi" type="email" id="sbEmail" style="width:220px;" autocomplete="username"></div>
+        <div class="fg"><label class="fl">Пароль</label>
+          <input class="fi" type="password" id="sbPass" style="width:180px;" autocomplete="current-password"></div>
+        <button class="btn btn-p" onclick="sbLogin()">Войти</button>
+        <button class="btn btn-o" onclick="sbLogout()">Выйти</button>
+      </div>
+      <div id="sbResult" style="font-size:13px;margin-top:10px;color:var(--text3);"></div>
+      <div class="dt-foot" style="padding-left:0;">Пароль в браузере не сохраняется — хранится только токен входа. Читать и писать может лишь тот, кто вошёл: анонимный ключ сам по себе ничего не открывает. Таблицы создаются один раз файлом <b>supabase_schema.sql</b> в разделе SQL Editor.</div>
     </div>
 
     <div class="card">
@@ -2108,6 +2214,7 @@ function loadWoltLink() {
 function setWoltLink(woltNum, orderNum) {
   if (orderNum) WOLT_LINK[woltNum] = orderNum; else delete WOLT_LINK[woltNum];
   try { localStorage.setItem('woltLink', JSON.stringify(WOLT_LINK)); } catch (e) {}
+  sbPush('woltLink');
   renderWolt();
 }
 function loadBranchAddr() {
@@ -2127,6 +2234,7 @@ function setBranchAddr(a, code) {
   const id = addrId(a);
   if (code) BRANCH_ADDR[id] = code; else delete BRANCH_ADDR[id];
   try { localStorage.setItem('branchAddr', JSON.stringify(BRANCH_ADDR)); } catch (e) {}
+  sbPush('branchAddr');
   renderWolt();
 }
 
@@ -2465,7 +2573,9 @@ function renderWolt() {
     ${branchAddrBlock()}
     <div class="dt-foot" style="padding-left:0;">Сопоставление по телефону клиента, затем по адресу доставки. Если пары нет — проверьте, тот ли период загружен в 0080.</div>`;
 
+  window._kpiPairs = pairs;
   renderQuality(pairs);
+  renderKpi();
 }
 
 // ── Качество работы операторов ────────────────────
@@ -2572,6 +2682,110 @@ function renderQuality(pairs) {
         </details></td></tr>` : ''}`).join('')}</tbody>
   </table></div>
   <div class="dt-foot" style="padding-left:0;">Кошелёк — разница между тарифом Wolt и тем, что оператор взял с клиента, и только по заказам, которые не дотянули до бесплатной доставки (до 02.09.2026 — от ${kFmt(17500)}, с 02.09.2026 — от ${kFmt(30000)}); он записывается на того, кто <b>принял заказ</b>. «Не та служба» — доставку везли через Wolt, а в 0080 пробита другая служба: деньги за доставку в кассе окажутся не под тем курьером. Опоздание — Wolt вручил позже планового времени из 0080; оно записывается на того, кто <b>вызвал курьера</b>: Wolt работает под одним общим аккаунтом, поэтому берём оператора, который в этот момент был на смене — принимал заказы.</div>`;
+}
+
+// ── Чеки за Яндекс и Индрайвер ────────────────────
+// Их присылает телеграм-бот. У чека нет ни телефона, ни адреса —
+// только служба, день, время и сумма, поэтому главный ключ это
+// № заказа, который оператор вводит в боте.
+let RECEIPTS = [];
+async function loadReceipts() {
+  const box = document.getElementById('rcResult'); if (!box) return;
+  if (!sbOn()) { box.textContent = 'Подключите Supabase в ⚙️ Настройках — чеки подтянутся сюда'; return; }
+  box.textContent = '⏳ Загружаем…';
+  try {
+    RECEIPTS = await sbReq('receipts?select=*&order=paid_date.desc,created_at.desc&limit=500') || [];
+    renderReceipts();
+  } catch (e) { box.innerHTML = '<span style="color:var(--red);">' + e.message + '</span>'; }
+}
+
+function matchReceipts() {
+  const byNum = {};
+  anOrders.forEach(o => { if (o.num) byNum[String(o.num)] = o; });
+  const svcRe = { 'Яндекс': /яндекс|yandex/i, 'Индрайвер': /индрайвер|indriv/i };
+  const taken = new Set();
+
+  // Проход 1 — по номеру заказа из бота
+  const pairs = RECEIPTS.map(r => {
+    const o = r.order_num && r.order_num !== '-' ? byNum[String(r.order_num)] : null;
+    if (o) taken.add(o);
+    return { r, o: o || null, via: o ? 'номеру' : '' };
+  });
+
+  // Проход 2 — служба + день + сумма, которую клиент заплатил за доставку
+  pairs.forEach(p => {
+    if (p.o || !p.r.service || !p.r.paid_date) return;
+    const re = svcRe[p.r.service]; if (!re) return;
+    const cand = anOrders.filter(o => !taken.has(o) && re.test(o.courier || '') &&
+      (o.openDate === p.r.paid_date || o.uchDate === p.r.paid_date))
+      .filter(o => { const paid = delivPaid(o);
+        return paid > 0 && Math.abs(paid - Number(p.r.amount || 0)) <= Math.max(300, Number(p.r.amount || 0) * 0.15); });
+    if (cand.length === 1) { taken.add(cand[0]); p.o = cand[0]; p.via = 'сумме'; }
+  });
+
+  // Проход 3 — служба + день + ближайшее время. Догадка, помечаем
+  pairs.forEach(p => {
+    if (p.o || !p.r.service || !p.r.paid_date) return;
+    const re = svcRe[p.r.service]; if (!re) return;
+    const t = new Date(p.r.paid_date + 'T' + (p.r.paid_time || '12:00') + ':00Z').getTime();
+    const cand = anOrders.filter(o => !taken.has(o) && re.test(o.courier || '') &&
+      (o.openDate === p.r.paid_date || o.uchDate === p.r.paid_date))
+      .map(o => ({ o, gap: Math.abs(new Date(o.openDate + 'T' + (o.openTime || '12:00:00') + 'Z').getTime() - t) }))
+      .sort((a, b) => a.gap - b.gap);
+    // Берём, только если ближайший заметно ближе остальных — иначе это лотерея
+    if (cand.length && (!cand[1] || cand[1].gap - cand[0].gap > 30 * 60000)) {
+      taken.add(cand[0].o); p.o = cand[0].o; p.via = 'времени';
+    }
+  });
+
+  const svcOrders = anOrders.filter(o =>
+    /яндекс|yandex|индрайвер|indriv/i.test(o.courier || '') && !taken.has(o));
+  return { pairs, svcOrders };
+}
+
+function renderReceipts() {
+  const box = document.getElementById('rcResult'); if (!box) return;
+  if (!RECEIPTS.length) { box.textContent = 'Чеков пока нет — пришлите первый боту'; return; }
+  const { pairs, svcOrders } = matchReceipts();
+  const spent = RECEIPTS.reduce((s, r) => s + Number(r.amount || 0), 0);
+  const nomatch = pairs.filter(p => !p.o).length;
+  const pend = RECEIPTS.filter(r => r.status === 'pending').length;
+
+  const kpi = [
+    ['Чеков', String(RECEIPTS.length), pend ? pend + ' не дозаполнены в боте' : 'все заполнены'],
+    ['Отдали за курьеров', kFmt(Math.round(spent)), 'средний ' + kFmt(Math.round(spent / RECEIPTS.length))],
+    ['Нашли заказ', (pairs.length - nomatch) + ' из ' + pairs.length, nomatch ? nomatch + ' без пары' : 'все сопоставлены'],
+    ['Заказы без чека', String(svcOrders.length), 'Яндекс/Индрайвер в 0080, чека нет']
+  ].map(([l, v, sub]) => `<div class="kpi"><div class="kpi-label">${l}</div><div class="kpi-val">${v}</div><div class="kpi-sub">${sub}</div></div>`).join('');
+
+  box.innerHTML = `
+    <div class="kpi-row" style="margin-bottom:12px;">${kpi}</div>
+    <div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>Чек</th><th>Служба</th><th style="text-align:right;">Отдали</th>
+        <th>Заказ в iiko</th><th style="text-align:right;">Клиент за доставку</th><th style="text-align:right;">Разница</th></tr></thead>
+      <tbody>${pairs.map(p => {
+        const r = p.r, o = p.o;
+        const paid = o ? delivPaid(o) : 0;
+        const diff = o ? paid - Number(r.amount || 0) : 0;
+        return `<tr>
+          <td>${r.paid_date ? ruDate(r.paid_date) : '—'} ${r.paid_time || ''}
+            <div style="font-size:10.5px;color:var(--text3);">${r.status === 'pending' ? 'не дозаполнен' : (r.tg_user || '')}</div></td>
+          <td>${r.service || '—'}</td>
+          <td class="mo" style="text-align:right;">${kFmt(Math.round(Number(r.amount || 0)))}</td>
+          <td>${o ? `№${o.num} · ${shortName(o.oper || '—')}
+                <div style="font-size:10.5px;color:var(--text3);">${ruDate(o.openDate)} ${(o.openTime||'').slice(0,5)}</div>
+                ${p.via !== 'номеру' ? `<i class="tag-free">по ${p.via} — проверьте</i>` : ''}`
+              : '<span style="color:var(--yellow);">заказ не найден</span>'}</td>
+          <td class="mo" style="text-align:right;">${o ? kFmt(Math.round(paid)) : '—'}</td>
+          <td class="mo" style="text-align:right;color:${o && diff < 0 ? 'var(--red)' : 'var(--text3)'};">${
+            o ? (diff >= 0 ? '+' : '') + kFmt(Math.round(diff)) : '—'}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>
+    ${svcOrders.length ? `<div class="dt-foot" style="padding-left:0;">
+      <b style="color:var(--yellow);">Заказы с Яндексом или Индрайвером, к которым чека нет (${svcOrders.length}):</b>
+      ${svcOrders.map(o => '№' + o.num + ' ' + o.courier + ' от ' + ruDate(o.openDate)).join(' · ')}</div>` : ''}
+    <div class="dt-foot" style="padding-left:0;">Порядок поиска: № заказа из бота → служба, день и совпадение суммы → служба, день и ближайшее время. Последние два помечаются «проверьте».</div>`;
 }
 
 // ── Счёт Wolt за месяц ────────────────────────────
@@ -2737,6 +2951,547 @@ function renderWoltInvoice() {
         ${corrs.map(c => ruDate(c.date) + ' ' + c.time + ' — ' + kFmt(Math.round(c.total))).join(' · ')}
       </div>` : ''}
     <div class="dt-foot" style="padding-left:0;">Жёлтым — дни, где число доставок в счёте не совпало с числом заказов с курьером Wolt в 0080. Сравнение идёт по учётному дню заказа.</div>`;
+}
+
+// ── Регламент по продукции ────────────────────────
+// t — время рейса, к которому продукт приезжает в филиал; p — нужен ли
+// предзаказ: no — нет, must — обязателен, d3 — за 3 дня, off — снят с продажи.
+const REGLAMENT = [
+  {"n":"«Таңқурай нәзіктігі» торты","t":"09:00","p":"must","r":"07:00"},
+  {"n":"Бананды кіші тарт","t":"09:00","p":"no","r":"07:00"},
+  {"n":"Бананды үлкен тарт","t":"09:00","p":"no","r":"07:00"},
+  {"n":"Бауырсақ (1контейнер=1,8кг)","t":"09:00","p":"no","r":"07:00"},
+  {"n":"Булочка весовой с маком","t":"09:00","p":"must","r":"07:00"},
+  {"n":"Десерт Павлова","t":"","p":"off","r":""},
+  {"n":"Дубайский тарт","t":"09:00","p":"must","r":"07:00"},
+  {"n":"Жемісті кіші","t":"12:00","p":"no","r":"09:00"},
+  {"n":"Капкейк","t":"09:00","p":"no","r":"07:00"},
+  {"n":"Кармашки сыр-колбаса","t":"09:00","p":"no","r":"07:00"},
+  {"n":"Картошка пирожное","t":"09:00","p":"must","r":"07:00"},
+  {"n":"Корпусты мусс десерті","t":"12:00","p":"must","r":"09:00"},
+  {"n":"Корпусты мусс десерті FISTA","t":"12:00","p":"must","r":"09:00"},
+  {"n":"Корпусты мусс десерті KOFE","t":"12:00","p":"must","r":"09:00"},
+  {"n":"Корпусты мусс десерті KOKOS","t":"12:00","p":"must","r":"09:00"},
+  {"n":"Куриный пирог","t":"09:00","p":"no","r":"07:00"},
+  {"n":"Лимонды кекс","t":"","p":"off","r":""},
+  {"n":"Макаронс Каракат","t":"09:00","p":"must","r":"07:00"},
+  {"n":"Макаронс Латте","t":"09:00","p":"must","r":"07:00"},
+  {"n":"Макаронс Пісте","t":"09:00","p":"must","r":"07:00"},
+  {"n":"Макаронс Танкурай","t":"09:00","p":"must","r":"07:00"},
+  {"n":"Макаронс Шоколад","t":"09:00","p":"must","r":"07:00"},
+  {"n":"Мини-Муравейник","t":"09:00","p":"no","r":"07:00"},
+  {"n":"Мясной пирог","t":"09:00","p":"no","r":"07:00"},
+  {"n":"Париж-Брест","t":"12:00","p":"no","r":"09:00"},
+  {"n":"Печенье Вупи","t":"09:00","p":"must","r":"07:00"},
+  {"n":"Пирожное Шу","t":"09:00","p":"no","r":"07:00"},
+  {"n":"Пирожок с капустой","t":"09:00","p":"no","r":"07:00"},
+  {"n":"Пирожок с картошкой","t":"09:00","p":"no","r":"07:00"},
+  {"n":"Рогалик сыр-картошка","t":"09:00","p":"must","r":"07:00"},
+  {"n":"Синнабон классика","t":"12:00","p":"no","r":"09:00"},
+  {"n":"Синнабон с грецким орехом","t":"12:00","p":"no","r":"09:00"},
+  {"n":"Сметанник","t":"09:00","p":"no","r":"07:00"},
+  {"n":"Сосиска в тесте","t":"09:00","p":"no","r":"07:00"},
+  {"n":"Сүзбелі кіші тарт малина","t":"09:00","p":"no","r":"07:00"},
+  {"n":"Сүзбелі кіші тарт миндаль","t":"09:00","p":"no","r":"07:00"},
+  {"n":"Сүзбелі-жидекті таңқурай","t":"09:00","p":"no","r":"07:00"},
+  {"n":"Тары қосылған қаймақты бәліш","t":"09:00","p":"no","r":"07:00"},
+  {"n":"Творожный большой","t":"09:00","p":"no","r":"07:00"},
+  {"n":"Творожный маленький","t":"09:00","p":"no","r":"07:00"},
+  {"n":"Чизкейк Нью-Йорк","t":"09:00","p":"must","r":"07:00"},
+  {"n":"Шоколадные маффины","t":"09:00","p":"no","r":"07:00"},
+  {"n":"Шоколадный","t":"09:00","p":"no","r":"07:00"},
+  {"n":"Шоколадты капкейк","t":"09:00","p":"no","r":"07:00"},
+  {"n":"Шоколадты тарт","t":"","p":"d3","r":""},
+  {"n":"Шоколадты құрма (кіші)","t":"12:00","p":"must","r":""},
+  {"n":"Шоколадты құрма (үлкен)","t":"12:00","p":"must","r":""},
+  {"n":"Шу с малиной","t":"09:00","p":"no","r":"07:00"},
+  {"n":"Шығыс бәліші","t":"09:00","p":"must","r":"07:00"},
+  {"n":"Эклер банан","t":"","p":"off","r":""},
+  {"n":"Эклер ваниль","t":"12:00","p":"no","r":"09:00"},
+  {"n":"Эклер шоколад","t":"12:00","p":"no","r":"09:00"},
+  {"n":"Яблочный кекс","t":"09:00","p":"no","r":"07:00"},
+  {"n":"Яблочный пирог","t":"09:00","p":"no","r":"07:00"},
+  {"n":"Қатпарлы сүзбелі тоқаш","t":"09:00","p":"must","r":"07:00"},
+  {"n":"Қатпарлы тоқаш алмамен","t":"09:00","p":"must","r":"07:00"},
+  {"n":"Құлпынайлы","t":"09:00","p":"must","r":"07:00"}
+];
+
+// Ищем правило по названию блюда: сначала точное совпадение, потом вхождение
+const REGL_MAP = (() => { const m = {}; REGLAMENT.forEach(r => m[nName(r.n)] = r); return m; })();
+function reglFor(dish) {
+  const k = nName(SYNONYMS[nName(dish)] || dish);
+  if (REGL_MAP[k]) return REGL_MAP[k];
+  // Только в одну сторону: название блюда содержит название из регламента.
+  // Обратное («Қаймақты» внутри «Тары қосылған қаймақты бәліш») даёт ложные пары.
+  let best = null;
+  for (const r of REGLAMENT) {
+    const rk = nName(r.n);
+    if (rk.length >= 8 && k.includes(rk) && (!best || nName(best.n).length < rk.length)) best = r;
+  }
+  return best;
+}
+
+// ══════════════════════════════════════════════════
+// Supabase: общее хранилище настроек и отчётов
+// Работаем обычным fetch по REST API — библиотека не нужна.
+// ══════════════════════════════════════════════════
+const SB = { url:'', key:'', token:'', refresh:'', email:'' };
+
+function sbLoad() {
+  try {
+    const c = JSON.parse(localStorage.getItem('sb') || '{}');
+    Object.assign(SB, { url:c.url||'', key:c.key||'', token:c.token||'', refresh:c.refresh||'', email:c.email||'' });
+  } catch (e) {}
+  const u = document.getElementById('sbUrl'), k = document.getElementById('sbKey'), e = document.getElementById('sbEmail');
+  if (u) u.value = SB.url; if (k) k.value = SB.key; if (e) e.value = SB.email;
+  sbBadge();
+  if (SB.token) sbPull();          // молча подтягиваем общее состояние
+}
+function sbSave() {
+  // Пароль не храним — только токены, их можно отозвать
+  try { localStorage.setItem('sb', JSON.stringify({ url:SB.url, key:SB.key, token:SB.token, refresh:SB.refresh, email:SB.email })); } catch (e) {}
+  sbBadge();
+}
+function sbBadge() {
+  const b = document.getElementById('sbBadge'); if (!b) return;
+  const on = !!(SB.url && SB.key && SB.token);
+  b.textContent = on ? 'Подключено · ' + (SB.email || '') : 'Не подключено';
+  b.className = 'badge ' + (on ? 'bg' : 'by');
+}
+const sbOn = () => !!(SB.url && SB.key && SB.token);
+function sbMsg(text, color) {
+  const el = document.getElementById('sbResult'); if (!el) return;
+  el.style.color = color || 'var(--text3)'; el.innerHTML = text;
+}
+
+async function sbLogin() {
+  SB.url = (document.getElementById('sbUrl').value || '').trim().replace(/\/+$/, '');
+  SB.key = (document.getElementById('sbKey').value || '').trim();
+  SB.email = (document.getElementById('sbEmail').value || '').trim();
+  const pass = document.getElementById('sbPass').value;
+  if (!SB.url || !SB.key || !SB.email || !pass) { sbMsg('Заполните все четыре поля', 'var(--red)'); return; }
+  sbMsg('⏳ Входим…');
+  try {
+    const r = await fetch(SB.url + '/auth/v1/token?grant_type=password', {
+      method:'POST', headers:{ apikey:SB.key, 'Content-Type':'application/json' },
+      body: JSON.stringify({ email:SB.email, password:pass })
+    });
+    const j = await r.json();
+    if (!r.ok || !j.access_token) throw new Error(j.error_description || j.msg || j.message || 'не удалось войти');
+    SB.token = j.access_token; SB.refresh = j.refresh_token || '';
+    document.getElementById('sbPass').value = '';
+    sbSave();
+    await sbPull();
+    sbMsg('✅ Вошли как ' + SB.email + '. Настройки и отчёты теперь общие.', 'var(--green)');
+  } catch (err) {
+    SB.token = ''; sbSave();
+    sbMsg('❌ ' + err.message, 'var(--red)');
+  }
+}
+function sbLogout() {
+  SB.token = ''; SB.refresh = ''; sbSave();
+  sbMsg('Вышли. Данные остались в облаке, локальные настройки не тронуты.');
+}
+
+// Токен живёт около часа — по 401 обновляем и повторяем запрос один раз
+async function sbReq(path, opts = {}, retry = true) {
+  if (!sbOn()) throw new Error('не подключено');
+  const r = await fetch(SB.url + '/rest/v1/' + path, {
+    ...opts,
+    headers: { apikey:SB.key, Authorization:'Bearer ' + SB.token,
+               'Content-Type':'application/json', ...(opts.headers || {}) }
+  });
+  if (r.status === 401 && retry && SB.refresh) {
+    const rr = await fetch(SB.url + '/auth/v1/token?grant_type=refresh_token', {
+      method:'POST', headers:{ apikey:SB.key, 'Content-Type':'application/json' },
+      body: JSON.stringify({ refresh_token: SB.refresh })
+    });
+    const j = await rr.json();
+    if (j.access_token) { SB.token = j.access_token; SB.refresh = j.refresh_token || SB.refresh; sbSave();
+      return sbReq(path, opts, false); }
+    SB.token = ''; sbSave();
+    throw new Error('вход истёк, войдите заново');
+  }
+  if (!r.ok) throw new Error(await r.text());
+  return r.status === 204 ? null : r.json();
+}
+
+// ── Общие настройки ───────────────────────────────
+// Что именно живёт в облаке: разметка адресов, ручные связки Wolt,
+// ставки KPI и ручные нарушения.
+const SB_STATE = {
+  branchAddr: { get:() => BRANCH_ADDR, set:v => { BRANCH_ADDR = v || {}; try { localStorage.setItem('branchAddr', JSON.stringify(BRANCH_ADDR)); } catch (e) {} } },
+  woltLink:   { get:() => WOLT_LINK,   set:v => { WOLT_LINK = v || {};   try { localStorage.setItem('woltLink', JSON.stringify(WOLT_LINK)); } catch (e) {} } },
+  kpiRates:   { get:() => KPI_RATES,   set:v => { if (v) { KPI_RATES = v; try { localStorage.setItem('kpiRates', JSON.stringify(v)); } catch (e) {} } } },
+  kpiManual:  { get:() => KPI_MANUAL,  set:v => { KPI_MANUAL = v || {};  try { localStorage.setItem('kpiManual', JSON.stringify(KPI_MANUAL)); } catch (e) {} } }
+};
+
+async function sbPull() {
+  if (!sbOn()) return;
+  try {
+    const rows = await sbReq('app_state?select=key,value');
+    (rows || []).forEach(r => { if (SB_STATE[r.key]) SB_STATE[r.key].set(r.value); });
+    if (typeof renderKpi === 'function') renderKpi();
+    if (typeof renderWolt === 'function' && woltRows.length) renderWolt();
+    await sbListDatasets();
+    await loadReceipts();
+  } catch (e) { sbMsg('Не удалось прочитать общие настройки: ' + e.message, 'var(--yellow)'); }
+}
+
+// Пишем по ключу; вызывается после каждого изменения настройки
+let _sbTimer = null;
+function sbPush(key) {
+  if (!sbOn() || !SB_STATE[key]) return;
+  clearTimeout(_sbTimer);
+  _sbTimer = setTimeout(async () => {
+    try {
+      await sbReq('app_state?on_conflict=key', {
+        method:'POST',
+        headers:{ Prefer:'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify({ key, value: SB_STATE[key].get(), updated_by: SB.email, updated_at: new Date().toISOString() })
+      });
+    } catch (e) { sbMsg('Не сохранилось в облако: ' + e.message, 'var(--yellow)'); }
+  }, 400);
+}
+
+// ── Отчёты в облаке ───────────────────────────────
+async function sbSaveDataset(kind, payload, label) {
+  if (!sbOn()) { alert('Сначала подключите Supabase в разделе ⚙️ Настройки'); return; }
+  if (!payload || !payload.length) { alert('Нечего сохранять'); return; }
+  const dates = payload.map(r => r.openDate || r.createdDate || r.date).filter(Boolean).sort();
+  try {
+    await sbReq('datasets', { method:'POST', headers:{ Prefer:'return=minimal' },
+      body: JSON.stringify({ kind, label: label || '', rows: payload.length,
+        date_from: dates[0] || null, date_to: dates[dates.length - 1] || null,
+        payload, created_by: SB.email }) });
+    await sbListDatasets();
+    alert('Сохранено в облако: ' + payload.length + ' строк');
+  } catch (e) { alert('Не сохранилось: ' + e.message); }
+}
+
+async function sbListDatasets() {
+  const sel = document.getElementById('sbDatasets'); if (!sel || !sbOn()) return;
+  try {
+    const rows = await sbReq('datasets?select=id,kind,label,date_from,date_to,rows,created_at,created_by&order=created_at.desc&limit=40');
+    sel.innerHTML = '<option value="">— выбрать сохранённый отчёт —</option>' + (rows || []).map(r =>
+      `<option value="${r.id}">${({orders:'0080', wolt:'Wolt', invoices:'Накладные'})[r.kind] || r.kind} · ${
+        r.date_from ? ruDate(r.date_from) + '—' + ruDate(r.date_to) : ''} · ${r.rows} строк · ${
+        (r.created_by || '').split('@')[0]}</option>`).join('');
+  } catch (e) {}
+}
+
+async function sbLoadDataset(id) {
+  if (!id || !sbOn()) return;
+  try {
+    const rows = await sbReq('datasets?select=kind,payload&id=eq.' + encodeURIComponent(id));
+    const d = (rows || [])[0]; if (!d) return;
+    if (d.kind === 'orders')   { anOrders = d.payload; renderAnalytics(); }
+    if (d.kind === 'wolt')     { woltRows = d.payload; renderWolt(); }
+    if (d.kind === 'invoices') { anInvoices = d.payload; renderRetro(); }
+    renderKpi();
+    const z = document.getElementById('anZone');
+    if (d.kind === 'orders' && z) { z.className = 'upload-zone done';
+      z.innerHTML = `<div style="font-size:22px;">☁️</div><div style="font-size:13px;font-weight:700;">Загружено из облака</div>
+        <div style="font-size:11px;color:var(--green);margin-top:3px;">Заказов: ${anOrders.length}</div>`; }
+  } catch (e) { alert('Не загрузилось: ' + e.message); }
+}
+
+// ══════════════════════════════════════════════════
+// KPI: нарушения считаются из тех же отчётов, что уже загружены
+// ══════════════════════════════════════════════════
+const KPI_DEF = {
+  rates: [
+    { key:'speed',   name:'Скорость и доступность', rate:1000,  full:0, half:1 },
+    { key:'quality', name:'Качество',               rate:1225,  full:1, half:2 },
+    { key:'disc',    name:'Дисциплина',             rate:1000,  full:0, half:1 }
+  ],
+  bonus: 10000
+};
+let KPI_RATES = null;
+function loadKpiRates() {
+  try { KPI_RATES = JSON.parse(localStorage.getItem('kpiRates') || 'null'); } catch (e) {}
+  if (!KPI_RATES) KPI_RATES = JSON.parse(JSON.stringify(KPI_DEF));
+}
+function saveKpiRates() {
+  try { localStorage.setItem('kpiRates', JSON.stringify(KPI_RATES)); } catch (e) {}
+  sbPush('kpiRates');
+  renderKpi();
+}
+function setKpiRate(i, field, v) {
+  const n = parseInt(String(v).replace(/\D/g, ''), 10);
+  if (!isNaN(n)) { KPI_RATES.rates[i][field] = n; saveKpiRates(); }
+}
+
+// Что проверяем автоматически. block — куда ложится нарушение.
+const KPI_CHECKS = [
+  { id:'nophone', block:'quality', name:'Нет телефона в заказе',
+    hint:'курьерский заказ без телефона клиента и без телефона доставки' },
+  { id:'noaddr',  block:'quality', name:'Адрес не заполнен',
+    hint:'пусто или «д. -» — курьер поедет вслепую' },
+  { id:'nobranch',block:'quality', name:'Филиал не указан в комментарии',
+    hint:'непонятно, какая точка отдаёт заказ' },
+  { id:'wrongsvc',block:'quality', name:'Пробита не та служба доставки',
+    hint:'везли через Wolt, а в 0080 другая служба или самовывоз' },
+  { id:'early',   block:'quality', name:'Предзаказ принят раньше рейса',
+    hint:'обещали клиенту время, когда продукт ещё не приехал в филиал' },
+  { id:'needpre', block:'quality', name:'Продукт требует предзаказа, а взяли день в день',
+    hint:'в регламенте помечен «Сұралуы тиіс» — надо было уточнить у цеха' },
+  { id:'offsale', block:'quality', name:'Продукт снят с продажи',
+    hint:'в регламенте «сатылымнан алынды»' },
+  { id:'need3d',  block:'quality', name:'Продукт нужен за 3 дня, взяли позже',
+    hint:'шоколадты тарт и маковый пирог принимаются за 3 дня' },
+  { id:'late',    block:'speed',   name:'Доставка позже обещанного времени',
+    hint:'Wolt вручил позже планового времени из 0080' },
+  { id:'shortfall',block:'money',  name:'Недобор за доставку',
+    hint:'взяли с клиента меньше тарифа Wolt, хотя доставка не бесплатная' },
+  { id:'freemiss',block:'money',   name:'Не предложили бесплатную доставку',
+    hint:'самовывоз на сумму от порога' }
+];
+
+// Собираем нарушения. Каждое — {date, oper, check, order, note}
+function kpiViolations() {
+  const out = [];
+  const add = (date, oper, check, order, note) =>
+    out.push({ date, oper: shortName(oper || '— не указан'), check, order, note });
+
+  const courier = o => !isPickup(o) && !!String(o.courier || '').trim();
+  anOrders.forEach(o => {
+    if (courier(o)) {
+      if (!phKey(o.phone) && !phKey(o.phoneD)) add(o.openDate, o.oper, 'nophone', o.num, o.client || '');
+      const a = String(o.addr || '').trim();
+      if (!a || /д\.\s*-\s*$/.test(a) || a.length < 8) add(o.openDate, o.oper, 'noaddr', o.num, a || 'пусто');
+      if (!branchesFromText(o.comment).length) add(o.openDate, o.oper, 'nobranch', o.num, o.comment || 'комментарий пуст');
+    }
+    if (freeMiss(o)) add(o.openDate, o.oper, 'freemiss', o.num, kFmt(goodsSum(o)));
+
+    // Регламент: во сколько продукт вообще появляется в филиале
+    const plan = o.planDT ? dtTime(o.planDT).slice(0, 5) : '';
+    const days = o.uchDate && o.openDate
+      ? Math.round((new Date(o.uchDate + 'T00:00:00Z') - new Date(o.openDate + 'T00:00:00Z')) / 864e5) : 0;
+    const seen = new Set();
+    (o.items || []).forEach(it => {
+      if (it.type === 'Услуга' || it.type === 'Модификатор' || NOT_GOODS.test(it.dish)) return;
+      const r = reglFor(it.dish); if (!r) return;
+      const key = r.n; if (seen.has(key)) return; seen.add(key);
+      if (r.p === 'off')  add(o.openDate, o.oper, 'offsale', o.num, it.dish);
+      else if (r.p === 'd3' && days < 3) add(o.openDate, o.oper, 'need3d', o.num, it.dish + ' · за ' + days + ' дн.');
+      else {
+        // Для дневных заказов оператор видит витрину, поэтому по умолчанию
+        // время рейса спрашиваем только с предзаказов
+        if (r.t && plan && plan < r.t && (kpiReglScope === 'all' || days > 0))
+          add(o.openDate, o.oper, 'early', o.num, it.dish + ' · рейс ' + r.t + ', обещали ' + plan);
+        if (r.p === 'must' && days === 0)
+          add(o.openDate, o.oper, 'needpre', o.num, it.dish);
+      }
+    });
+  });
+
+  // То, что видно только в паре с Wolt
+  (window._kpiPairs || []).forEach(p => {
+    const w = p.w, o = p.o;
+    if (!o || /отклон|отмен/i.test(w.status)) return;
+    if (!/wolt/i.test(o.courier || ''))
+      add(o.openDate, o.oper, 'wrongsvc', o.num,
+          isPickup(o) ? 'пробит самовывоз' : 'в 0080: ' + o.courier);
+    const paid = delivPaid(o);
+    if (o.sum - paid < freeFrom(o.openDate) && paid - w.fee < 0)
+      add(o.openDate, o.oper, 'shortfall', o.num,
+          'тариф ' + kFmt(Math.round(w.fee)) + ', взяли ' + kFmt(Math.round(paid)));
+    if (o.planDT && w.toDate && w.toTime) {
+      const min = Math.round((new Date(w.toDate + 'T' + w.toTime + ':00Z').getTime()
+                            - new Date(o.planDT.replace(' ', 'T') + 'Z').getTime()) / 60000);
+      if (min > 0) {
+        // Отвечает тот, кто вызвал курьера — то есть кто был на смене в этот момент
+        const who = kpiShiftAt(w.createdDate, w.createdTime) || o.oper;
+        add(w.createdDate, who, 'late', o.num, '+' + min + ' мин');
+      }
+    }
+  });
+  return out;
+}
+
+function kpiShiftAt(date, time) {
+  const t = new Date(date + 'T' + (time || '12:00') + ':00Z').getTime();
+  let best = '', gap = Infinity;
+  anOrders.forEach(o => {
+    if (o.openDate !== date || !o.oper) return;
+    const g = Math.abs(new Date(o.openDate + 'T' + (o.openTime || '12:00:00') + 'Z').getTime() - t);
+    if (g < gap) { gap = g; best = o.oper; }
+  });
+  return best;
+}
+
+// Ручные нарушения — то, что видно только человеку (звонки, касса, скрипт)
+// Регламент писался под предзаказы, поэтому время рейса по умолчанию
+// проверяется только там, где заказ принят на другую дату.
+let kpiReglScope = 'pre';
+function setReglScope(v, el) {
+  kpiReglScope = v;
+  try { localStorage.setItem('kpiReglScope', v); } catch (e) {}
+  document.querySelectorAll('#rs-pre,#rs-all').forEach(x => x.classList.remove('active'));
+  if (el) el.classList.add('active');
+  renderKpi();
+}
+
+let KPI_MANUAL = {};
+function loadKpiManual() {
+  try { KPI_MANUAL = JSON.parse(localStorage.getItem('kpiManual') || '{}'); } catch (e) { KPI_MANUAL = {}; }
+}
+function setKpiManual(date, oper, block, v) {
+  const k = date + '|' + oper + '|' + block;
+  const n = parseInt(String(v).replace(/\D/g, ''), 10);
+  if (n) KPI_MANUAL[k] = n; else delete KPI_MANUAL[k];
+  try { localStorage.setItem('kpiManual', JSON.stringify(KPI_MANUAL)); } catch (e) {}
+  sbPush('kpiManual');
+  renderKpi();
+}
+const kpiManual = (d, o, b) => KPI_MANUAL[d + '|' + o + '|' + b] || 0;
+
+// Премия блока по числу нарушений
+function blockPay(r, n) { return n <= r.full ? r.rate : n <= r.half ? Math.round(r.rate / 2) : 0; }
+
+let _kpiShifts = [];
+function renderKpi() {
+  if (!KPI_RATES) loadKpiRates();
+  const rb = document.getElementById('kpiRates'); if (!rb) return;
+  rb.innerHTML = KPI_RATES.rates.map((r, i) => `<tr>
+    <td>${r.name}</td>
+    ${['rate','full','half'].map(f => `<td style="text-align:right;">
+      <input class="fi" style="width:90px;text-align:right;padding:3px 6px;font-size:12px;" value="${r[f]}"
+             onchange="setKpiRate(${i},'${f}',this.value)"></td>`).join('')}
+  </tr>`).join('');
+  document.getElementById('kpiRateBadge').textContent =
+    'чистая смена ' + kFmt(KPI_RATES.rates.reduce((s, r) => s + r.rate, 0));
+
+  const V = kpiViolations();
+  const byCheck = {};
+  V.forEach(v => (byCheck[v.check] = byCheck[v.check] || []).push(v));
+  const fb = document.getElementById('kpiFoundBadge');
+  fb.textContent = anOrders.length ? V.length + ' нарушений' : 'Нет данных';
+  fb.className = 'badge ' + (V.length ? 'by' : anOrders.length ? 'bg' : 'by');
+
+  // Сколько позиций отчёта регламент не покрывает — чтобы его можно было дополнить
+  const noRule = new Set();
+  anOrders.forEach(o => (o.items || []).forEach(it => {
+    if (it.type === 'Услуга' || it.type === 'Модификатор' || NOT_GOODS.test(it.dish)) return;
+    if (!reglFor(it.dish)) noRule.add(it.dish);
+  }));
+
+  document.getElementById('kpiChecks').innerHTML = !anOrders.length
+    ? 'Загрузите отчёт 0080 в разделе «Аналитика» — нарушения посчитаются сами'
+    : KPI_CHECKS.map(c => {
+        const list = byCheck[c.id] || [];
+        return `<details class="dt"${list.length ? '' : ' style="opacity:.55;"'}>
+          <summary><div class="dt-head"><span class="chev">▶</span><b>${c.name}</b>
+            <span class="dt-tot" style="color:${list.length ? 'var(--red)' : 'var(--green)'};">${list.length}</span></div></summary>
+          <div class="dt-body">
+            <div class="dt-foot" style="padding-left:0;">${c.hint}</div>
+            <div class="dt-days" style="padding-left:0;">${list.slice(0, 60).map(v =>
+              `<div><span>№${v.order} · ${ruDate(v.date)} · ${v.oper}</span><span>${v.note}</span></div>`).join('')
+              || '<div style="color:var(--green);">нарушений нет</div>'}</div>
+          </div></details>`;
+      }).join('') + (noRule.size ? `
+        <details class="dt" style="margin-top:8px;">
+          <summary><div class="dt-head"><span class="chev">▶</span><b>Нет в регламенте</b>
+            <span class="dt-tot" style="color:var(--yellow);">${noRule.size}</span></div></summary>
+          <div class="dt-body">
+            <div class="dt-foot" style="padding-left:0;">По этим позициям регламент ничего не говорит — проверки рейса и предзаказа для них не работают. Пришлите обновлённый регламент, и они добавятся.</div>
+            <div class="dt-days" style="padding-left:0;">${[...noRule].sort().map(d => '<div><span>' + d + '</span><span></span></div>').join('')}</div>
+          </div></details>` : '');
+
+  // ── Смены ──
+  const shifts = {};
+  anOrders.forEach(o => {
+    if (!o.openDate || !o.oper) return;
+    const k = o.openDate + '|' + shortName(o.oper);
+    shifts[k] = shifts[k] || { date:o.openDate, oper:shortName(o.oper), speed:0, quality:0, money:0, orders:0, sum:0 };
+    shifts[k].orders++; shifts[k].sum += o.sum;
+  });
+  V.forEach(v => {
+    const k = v.date + '|' + v.oper;
+    if (!shifts[k]) shifts[k] = { date:v.date, oper:v.oper, speed:0, quality:0, money:0, orders:0, sum:0 };
+    if (v.check === 'freemiss' || v.check === 'shortfall') shifts[k].money++;
+    else if (KPI_CHECKS.find(c => c.id === v.check).block === 'speed') shifts[k].speed++;
+    else shifts[k].quality++;
+  });
+  _kpiShifts = Object.values(shifts).sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : (a.oper < b.oper ? -1 : 1));
+
+  const R = KPI_RATES.rates;
+  _kpiShifts.forEach(sh => {
+    sh.nSpeed = sh.speed + kpiManual(sh.date, sh.oper, 'speed');
+    sh.nQual  = sh.quality + kpiManual(sh.date, sh.oper, 'quality');
+    sh.nDisc  = kpiManual(sh.date, sh.oper, 'disc');
+    sh.pay = blockPay(R[0], sh.nSpeed) + blockPay(R[1], sh.nQual) + blockPay(R[2], sh.nDisc);
+  });
+
+  document.getElementById('kpiShiftBadge').textContent = _kpiShifts.length + ' смен';
+  const maxPay = KPI_RATES.rates.reduce((s, r) => s + r.rate, 0);
+  document.getElementById('kpiShifts').innerHTML = !_kpiShifts.length
+    ? '<div style="font-size:13px;color:var(--text3);">Нет данных</div>'
+    : `<div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>Дата</th><th>Оператор</th>
+        <th style="text-align:right;">Скорость</th><th style="text-align:right;">Качество</th>
+        <th style="text-align:right;">Дисциплина</th><th style="text-align:right;">Деньги</th>
+        <th style="text-align:right;">Премия смены</th></tr></thead>
+      <tbody>${_kpiShifts.map(sh => `<tr>
+        <td>${dayLabel(sh.date)}</td><td><b>${sh.oper}</b>
+          <div style="font-size:10.5px;color:var(--text3);">${sh.orders} зак. · ${kFmt(sh.sum)}</div></td>
+        <td style="text-align:right;">${cellN(sh, 'speed', sh.speed, sh.nSpeed)}</td>
+        <td style="text-align:right;">${cellN(sh, 'quality', sh.quality, sh.nQual)}</td>
+        <td style="text-align:right;">${cellN(sh, 'disc', 0, sh.nDisc)}</td>
+        <td class="mo" style="text-align:right;color:${sh.money ? 'var(--a2)' : 'var(--text3)'};">${sh.money}</td>
+        <td class="mo" style="text-align:right;font-weight:600;color:${sh.pay === maxPay ? 'var(--green)' : sh.pay ? '' : 'var(--red)'};">${kFmt(sh.pay)}</td>
+      </tr>`).join('')}</tbody></table></div>
+      <div class="dt-foot" style="padding-left:0;">Цифра под полем — сколько нашлось автоматически; в поле можно дописать нарушения, которых нет в отчётах (звонки, скрипт, касса). «Деньги» на премию пока не влияют — это отдельный разговор с оператором.</div>`;
+
+  // ── Итог ──
+  const by = {};
+  _kpiShifts.forEach(sh => {
+    const e = by[sh.oper] = by[sh.oper] || { oper:sh.oper, n:0, pay:0, sum:0, viol:0 };
+    e.n++; e.pay += sh.pay; e.sum += sh.sum; e.viol += sh.nSpeed + sh.nQual + sh.nDisc;
+  });
+  const tot = Object.values(by).sort((a, b) => b.pay - a.pay);
+  document.getElementById('kpiTotal').innerHTML = !tot.length ? '' : `
+    <div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>Оператор</th><th style="text-align:right;">Смен</th>
+        <th style="text-align:right;">Нарушений</th><th style="text-align:right;">Выручка</th>
+        <th style="text-align:right;">Премия KPI</th><th style="text-align:right;">Максимум</th>
+        <th style="text-align:right;">% от максимума</th></tr></thead>
+      <tbody>${tot.map(e => {
+        const max = e.n * maxPay;
+        return `<tr><td><b>${e.oper}</b></td>
+          <td class="mo" style="text-align:right;">${e.n}</td>
+          <td class="mo" style="text-align:right;color:${e.viol ? 'var(--red)' : 'var(--green)'};">${e.viol}</td>
+          <td class="mo" style="text-align:right;">${kFmt(e.sum)}</td>
+          <td class="mo" style="text-align:right;font-weight:600;">${kFmt(e.pay)}</td>
+          <td class="mo" style="text-align:right;color:var(--text3);">${kFmt(max)}</td>
+          <td class="mo" style="text-align:right;">${Math.round(e.pay / max * 100)}%</td></tr>`;
+      }).join('')}</tbody></table></div>
+    <div class="dt-foot" style="padding-left:0;">Премия за план продаж (${kFmt(KPI_RATES.bonus)} в месяц) сюда не входит — она начисляется отдельно.</div>`;
+}
+
+const cellN = (sh, block, auto, total) => `
+  <input class="fi" style="width:52px;text-align:right;padding:2px 4px;font-size:12px;"
+         value="${kpiManual(sh.date, sh.oper, block) || ''}" placeholder="0"
+         onchange="setKpiManual('${sh.date}','${sh.oper}','${block}',this.value)">
+  <div style="font-size:10px;color:${auto ? 'var(--red)' : 'var(--text3)'};">авто ${auto} · всего ${total}</div>`;
+
+// Выгрузка в формате листов KPI.xlsx
+function exportKpi() {
+  if (!_kpiShifts.length) { alert('Сначала загрузите отчёт 0080 в разделе «Аналитика»'); return; }
+  const V = kpiViolations();
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+    ['Дата', 'Оператор', 'Скорость: нарушений', 'Качество: нарушений', 'Дисциплина: нарушений', 'Премия смены, ₸'],
+    ..._kpiShifts.map(sh => [ruDate(sh.date), sh.oper, sh.nSpeed, sh.nQual, sh.nDisc, sh.pay])
+  ]), 'Смены');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+    ['Дата', 'Оператор', 'Блок', 'Нарушение', 'Заказ', 'Комментарий'],
+    ...V.map(v => { const c = KPI_CHECKS.find(x => x.id === v.check);
+      return [ruDate(v.date), v.oper, c.block === 'speed' ? 'Скорость' : c.block === 'money' ? 'Деньги' : 'Качество',
+              c.name, '№' + v.order, v.note]; })
+  ]), 'Нарушения');
+  XLSX.writeFile(wb, 'KPI_' + (_kpiShifts[0].date || '') + '.xlsx');
 }
 
 function resetAnalytics() {
@@ -3034,6 +3789,7 @@ function renderAnalytics() {
   renderRetro();
   if (woltRows.length) renderWolt();
   if (wiRows.length) renderWoltInvoice();
+  renderKpi();
 }
 
 // Раскладывает позиции заказа по категориям и блюдам сразу в несколько корзин.
@@ -3623,6 +4379,12 @@ document.addEventListener('DOMContentLoaded', () => {
   initWoltInvoice();
   loadBranchAddr();
   loadWoltLink();
+  loadKpiRates(); loadKpiManual(); sbLoad();
+  try { const v = localStorage.getItem('kpiReglScope');
+        if (v) { kpiReglScope = v; const el = document.getElementById('rs-' + v);
+                 document.querySelectorAll('#rs-pre,#rs-all').forEach(x => x.classList.remove('active'));
+                 if (el) el.classList.add('active'); } } catch (e) {}
+  renderKpi();
   const url = ls('scriptUrl');
   if(url && url !== 'undefined'){ document.getElementById('scriptUrl').value=url; updateConnBadge(true); }
   else if(url === 'undefined'){ localStorage.removeItem('scriptUrl'); }
