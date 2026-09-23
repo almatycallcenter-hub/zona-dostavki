@@ -210,7 +210,7 @@ body { font-family:'Segoe UI',Arial,sans-serif; background:#f7f7f7; }
     <div class="sub">Калькулятор доставки</div>
   </div>
   <div id="search-wrap">
-    <input id="addr-input" type="text" placeholder="Поиск адреса… или кликните на карту" autocomplete="off"/>
+    <input id="addr-input" type="text" placeholder="Адрес, координаты из 2ГИС или клик по карте" autocomplete="off"/>
     <button id="search-btn" onclick="doSearch()">Найти</button>
     <div id="suggestions"></div>
   </div>
@@ -482,8 +482,35 @@ async function nominatimFetch(q){
 
 function inAlmaty(lat,lon){ return lon>=76.4&&lon<=77.5&&lat>=43.0&&lat<=43.6; }
 
+// «43.259973, 76.891585» — в 2ГИС такие координаты копируются одной кнопкой.
+// Самый надёжный путь, когда по названию адрес не находится.
+function parseCoords(q){
+  const m=String(q).match(/^\s*(-?\d{1,2}[.,]\d{2,})\s*[,; ]\s*(-?\d{1,3}[.,]\d{2,})\s*$/);
+  if(!m) return null;
+  let a=parseFloat(m[1].replace(',','.')), b=parseFloat(m[2].replace(',','.'));
+  // В 2ГИС порядок «широта, долгота», но встречается и обратный — различаем по величине
+  if(a>60&&b<60){ const t=a; a=b; b=t; }
+  // Если это точно координаты, но не Алматы — так и скажем, а не пойдём
+  // искать по тексту: иначе «55.75, 37.61» превратится в случайный адрес
+  return inAlmaty(a,b)
+    ? {lat:a,lon:b,display_name:`Координаты ${a.toFixed(6)}, ${b.toFixed(6)}`}
+    : {outside:true};
+}
+
+// Nominatim часто отдаёт «похожий» адрес на другой улице: на запрос
+// «райымбека 212/2» — «улицу Асета Бейсеуова» в 18 км. Поэтому требуем,
+// чтобы название улицы из запроса встречалось в ответе.
+function streetOk(q,name){
+  const words=String(q).toLowerCase().replace(/ё/g,'е').match(/[а-яa-z]{5,}/g)||[];
+  if(!words.length) return true;
+  const n=String(name||'').toLowerCase().replace(/ё/g,'е');
+  return words.some(w=>n.includes(w.slice(0,Math.min(w.length,7))));
+}
+
 // Search: try 2GIS suggest → 2GIS catalog → Nominatim
 async function geoSearch(q){
+  const pt=parseCoords(q);
+  if(pt) return pt.outside ? [] : [pt];
   const clean=cleanQ(q);
   const variants=[clean, clean.split(',').slice(0,2).join(','), clean.split(',')[0]]
     .filter((v,i,a)=>v&&a.indexOf(v)===i);
@@ -497,9 +524,9 @@ async function geoSearch(q){
     const res=await twogisFetch(qv);
     if(res.length) return res;
   }
-  // 3. Nominatim fallback
+  // 3. Nominatim — только если улица в ответе совпала с запросом
   for(const qv of variants){
-    const res=await nominatimFetch(qv);
+    const res=(await nominatimFetch(qv)).filter(r=>streetOk(qv,r.display_name));
     if(res.length) return res;
   }
   return[];
@@ -534,7 +561,12 @@ async function doSearch(){
   btn.disabled=true; btn.textContent='...';
   try{
     const results=await geoSearch(q);
-    if(!results.length){ alert('Адрес не найден.\nПопробуйте: "Тургут Озала, 194" или кликните на карту'); return; }
+    if(!results.length){
+      const pc=parseCoords(q);
+      if(pc&&pc.outside){ alert('Эти координаты за пределами Алматы — проверьте, что скопировали.'); return; }
+      alert('Адрес не найден.\n\nНадёжный способ: откройте адрес в 2ГИС, скопируйте координаты '
+           +'(строка вида 43.259973, 76.891585) и вставьте их сюда.\n\nИли просто кликните по карте.');
+      return; }
     const d=results[0];
     setDestination(d.lat, d.lon, featureLabel(d)||d.display_name);
   }catch(e){
