@@ -425,6 +425,13 @@ details[open] > summary .chev { transform:rotate(90deg); }
   .txn-pp-row { flex-direction:column; gap:6px; }
   .txn-pp-date { width:100%; }
 }
+/* ── ТАБЕЛЬ ──────────────────────────── */
+.tb-grid th, .tb-grid td { white-space:nowrap; }
+.tb-grid td { padding:4px 6px; }
+.tb-n { text-align:center !important; font-size:12px; padding:4px 6px !important; }
+.tb-c { width:42px; border:1px solid var(--border); border-radius:6px; padding:4px 2px; text-align:center;
+        font-family:var(--mono); font-size:11.5px; background:var(--bg2); color:var(--text); outline:none; }
+.tb-c:focus { border-color:var(--accent); box-shadow:0 0 0 2px var(--glow); }
 </style>
 </head>
 <body>
@@ -448,6 +455,9 @@ details[open] > summary .chev { transform:rotate(90deg); }
     </button>
     <button class="nav-item" onclick="go('kpi')">
       <span class="icon">🎯</span> KPI
+    </button>
+    <button class="nav-item" onclick="go('tabel')">
+      <span class="icon">📅</span> Табель
     </button>
     <div class="sb-section">Производство</div>
     <button class="nav-item" onclick="openApp('calc')">
@@ -478,6 +488,9 @@ details[open] > summary .chev { transform:rotate(90deg); }
   <button class="mob-nav-btn" id="mn-analytics" onclick="go('analytics')">
     <span class="mn-icon">📈</span>Аналитика
   </button>
+  <button class="mob-nav-btn" id="mn-tabel" onclick="go('tabel')">
+    <span class="mn-icon">📅</span>Табель
+  </button>
   <button class="mob-nav-btn" id="mn-calc" onclick="openApp('calc')">
     <span class="mn-icon">🗺️</span>Доставка
   </button>
@@ -507,6 +520,12 @@ details[open] > summary .chev { transform:rotate(90deg); }
         <div class="mc-icon">💳</div>
         <div class="mc-title">Касса</div>
         <div class="mc-sub">Сверка Kaspi Pay по сменам. Сопоставление заказов iiko по дате принятия.</div>
+        <span class="mc-badge mc-active">Открыть</span>
+      </div>
+      <div class="module-card" onclick="go('tabel')">
+        <div class="mc-icon">📅</div>
+        <div class="mc-title">Табель</div>
+        <div class="mc-sub">Журнал явки из iiko → табель за месяц: часы, выходные, отпуск, переработка, KPI.</div>
         <span class="mc-badge mc-active">Открыть</span>
       </div>
       <div class="module-card" onclick="openApp('calc')">
@@ -1025,6 +1044,77 @@ details[open] > summary .chev { transform:rotate(90deg); }
 </div>
 
 <!-- НАСТРОЙКИ ─────────────────────────── -->
+<!-- ТАБЕЛЬ ───────────────────────────── -->
+<div class="page" id="page-tabel">
+  <div class="page-header">
+    <div><div class="page-title">📅 Табель</div>
+    <div class="page-sub">Журнал явки из iiko → табель за месяц для бухгалтерии</div></div>
+  </div>
+  <div class="page-body">
+
+    <div class="card">
+      <div class="card-head">
+        <div><div class="card-title">📂 Журнал явки</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px;">выгрузка из iikoChain за месяц, .xlsx — файл обрабатывается только в браузере</div></div>
+        <span class="badge by" id="tbBadge">Нет данных</span>
+      </div>
+      <div class="upload-zone" id="tbZone" style="padding:18px;margin-bottom:12px;" onclick="document.getElementById('tbFile').click()">
+        <div style="font-size:24px;margin-bottom:6px;">🗂️</div>
+        <div style="font-size:13px;font-weight:700;">Загрузить «Журнал явки»</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:3px;">нажмите или перетащите файл сюда</div>
+      </div>
+      <input type="file" id="tbFile" accept=".xlsx,.xls" style="display:none;">
+      <div class="frow" style="margin-bottom:0;">
+        <div class="fg" style="width:240px;"><label class="fl">Бөлімше</label>
+          <input class="fi" id="tbBranch" placeholder="АТАКЕНТ КЦ" oninput="tbSaveCfg();"></div>
+        <div class="fg" style="width:200px;"><label class="fl">Месяц</label>
+          <input class="fi" id="tbMonthLbl" disabled value="—"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div><div class="card-title">⚙️ Правила по должностям</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px;">сохраняются в браузере · новые должности из журнала добавляются сами</div></div>
+      </div>
+      <div class="tbl-wrap" style="overflow-x:auto;"><table class="tbl" id="tbRulesTbl">
+        <thead><tr><th>Должность</th><th>График</th><th style="text-align:right;">Часов в смене</th>
+          <th style="text-align:right;">Норма, ч</th><th>Уход после — обрезать до</th>
+          <th>Часы</th><th style="text-align:right;">KPI, ₸</th></tr></thead>
+        <tbody id="tbRules"></tbody>
+      </table></div>
+      <div class="dt-foot" style="padding-left:0;">Время округляется до 5 минут (12:24 → 12:25, 13:03 → 13:00). «По графику» — каждый рабочий день = часов в смене, будни без отметки тоже заполняются (для 5/2). Норма пустая = считается сама: 5/2 — рабочие дни месяца × часы, 2/2 — 15 смен × часы.</div>
+    </div>
+
+    <div class="card" id="tbGridCard" style="display:none;">
+      <div class="card-head">
+        <div><div class="card-title">🗓 Табель</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px;">любую ячейку можно исправить: часы (9, 12:10) или код — В выходной, О отпуск, Б больничный, БС без содержания, П прогул</div></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button class="btn btn-o btn-sm" onclick="tbRecalc(true)">↺ Пересчитать из журнала</button>
+          <button class="btn btn-p btn-sm" onclick="tbExport()">⬇️ Скачать табель .xlsx</button>
+        </div>
+      </div>
+      <div class="frow" style="margin-bottom:12px;align-items:flex-end;">
+        <div class="fg" style="width:260px;"><label class="fl">Сотрудник</label><select class="fi" id="tbPEmp"></select></div>
+        <div class="fg" style="width:170px;"><label class="fl">Отметить</label>
+          <select class="fi" id="tbPCode">
+            <option value="О">О — отпуск</option><option value="Б">Б — больничный</option>
+            <option value="БС">БС — без содержания</option><option value="П">П — прогул</option>
+            <option value="В">В — выходной</option>
+          </select></div>
+        <div class="fg" style="width:90px;"><label class="fl">С</label><input class="fi" type="number" id="tbPFrom" min="1" max="31"></div>
+        <div class="fg" style="width:90px;"><label class="fl">По</label><input class="fi" type="number" id="tbPTo" min="1" max="31"></div>
+        <button class="btn btn-o btn-sm" style="margin-bottom:4px;" onclick="tbApplyPeriod()">Применить</button>
+      </div>
+      <div id="tbWarn"></div>
+      <div class="tbl-wrap" style="overflow-x:auto;"><div id="tbGrid"></div></div>
+      <div class="dt-foot" style="padding-left:0;">Норма в табель не выводится — она нужна для расчёта переработки. Отпуск/больничный в будни уменьшают норму у графика 5/2 сами. Наведите на ячейку — покажет исходные отметки.</div>
+    </div>
+
+  </div>
+</div>
+
 <div class="page" id="page-settings">
   <div class="page-header"><div><div class="page-title">⚙️ Настройки</div><div class="page-sub">Подключение и конфигурация</div></div></div>
   <div class="page-body">
@@ -4391,6 +4481,375 @@ document.addEventListener('DOMContentLoaded', () => {
   const ops = ls('operators');
   if(ops) updateOpSelect();
 });
+</script>
+<script>
+// ══════════════════════════════════════════════════
+//  ТАБЕЛЬ — Журнал явки (iikoChain) → табель за месяц
+// ══════════════════════════════════════════════════
+const TB_MONTHS = [['Қаңтар','Январь'],['Ақпан','Февраль'],['Наурыз','Март'],['Сәуір','Апрель'],['Мамыр','Май'],['Маусым','Июнь'],
+  ['Шілде','Июль'],['Тамыз','Август'],['Қыркүйек','Сентябрь'],['Қазан','Октябрь'],['Қараша','Ноябрь'],['Желтоқсан','Декабрь']];
+// Праздники РК (без переносов — норму при необходимости поправьте вручную)
+const TB_HOLIDAYS = ['01-01','01-02','03-08','03-21','03-22','03-23','05-01','05-07','05-09','07-06','08-30','10-25','12-16'];
+const TB_CODES = ['В','О','Б','БС','П'];
+const TB_DEFAULT_RULES = {
+  'Оператор доставки': { sched:'2/2', shiftH:12, norm:'', cap:'21:00', mode:'fact', kpi:50000 },
+  'Call-Center':       { sched:'5/2', shiftH:9,  norm:'', cap:'',      mode:'sched', kpi:'' },
+};
+let tbRules = {}, tbData = null; // tbData = {year, month, days, emps:[...]}
+
+function tbLoadCfg() {
+  try { tbRules = JSON.parse(localStorage.getItem('tabelRules') || 'null') || {}; } catch(e) { tbRules = {}; }
+  for (const [k,v] of Object.entries(TB_DEFAULT_RULES)) if (!tbRules[k]) tbRules[k] = {...v};
+  let br = 'АТАКЕНТ КЦ'; try { br = localStorage.getItem('tabelBranch') || br; } catch(e) {}
+  const el = document.getElementById('tbBranch'); if (el) el.value = br;
+  tbRenderRules();
+}
+function tbSaveCfg() {
+  try { localStorage.setItem('tabelRules', JSON.stringify(tbRules));
+        localStorage.setItem('tabelBranch', document.getElementById('tbBranch').value); } catch(e) {}
+}
+const tbEsc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const tbHM  = m => Math.floor(m/60) + ':' + String(m%60).padStart(2,'0');
+const tbCellTxt = m => m % 60 === 0 ? String(m/60) : tbHM(m);
+const tbR5  = m => Math.floor((m + 2) / 5) * 5;
+function tbParseHM(s) { const m = String(s).trim().match(/^(\d{1,2})[:.](\d{2})$/); return m ? (+m[1])*60 + (+m[2]) : null; }
+
+function tbRenderRules() {
+  const tb = document.getElementById('tbRules'); if (!tb) return;
+  tb.innerHTML = Object.entries(tbRules).map(([pos, r]) => `<tr>
+    <td style="font-weight:600;">${tbEsc(pos)}</td>
+    <td><select class="fi" style="width:80px;padding:4px 8px;" onchange="tbSetRule('${tbEsc(pos)}','sched',this.value)">
+      ${['2/2','5/2'].map(o => `<option${o===r.sched?' selected':''}>${o}</option>`).join('')}</select></td>
+    <td style="text-align:right;"><input class="fi" type="number" style="width:70px;padding:4px 8px;text-align:right;" value="${r.shiftH}" onchange="tbSetRule('${tbEsc(pos)}','shiftH',+this.value)"></td>
+    <td style="text-align:right;"><input class="fi" type="number" style="width:80px;padding:4px 8px;text-align:right;" placeholder="авто" value="${r.norm}" onchange="tbSetRule('${tbEsc(pos)}','norm',this.value)"></td>
+    <td><input class="fi" style="width:90px;padding:4px 8px;" placeholder="не обрезать" value="${tbEsc(r.cap)}" onchange="tbSetRule('${tbEsc(pos)}','cap',this.value.trim())"></td>
+    <td><select class="fi" style="width:150px;padding:4px 8px;" onchange="tbSetRule('${tbEsc(pos)}','mode',this.value)">
+      <option value="fact"${r.mode==='fact'?' selected':''}>по отметкам</option>
+      <option value="sched"${r.mode==='sched'?' selected':''}>по графику</option></select></td>
+    <td style="text-align:right;"><input class="fi" type="number" style="width:90px;padding:4px 8px;text-align:right;" placeholder="—" value="${r.kpi}" onchange="tbSetRule('${tbEsc(pos)}','kpi',this.value)"></td>
+  </tr>`).join('');
+}
+function tbSetRule(pos, key, val) {
+  tbRules[pos][key] = val; tbSaveCfg();
+  if (tbData) tbRecalc(key !== 'norm' && key !== 'kpi'); // норма/KPI — без пересборки ячеек
+}
+
+// ── Разбор журнала явки ──
+function tbParseJournal(aoa) {
+  const hi = aoa.findIndex(r => r && String(r[0] ?? '').trim().startsWith('Табельный'));
+  if (hi < 0) throw new Error('Не нашли строку «Табельный номер» — это точно Журнал явки?');
+  const head = aoa[hi];
+  const cols = [];
+  for (let c = 4; c < head.length; c++) {
+    const m = String(head[c] ?? '').match(/(\d{2})\.(\d{2})\.(\d{4})/);
+    if (m) cols.push({ c, d:+m[1], mo:+m[2], y:+m[3] });
+  }
+  if (!cols.length) throw new Error('В шапке нет дат');
+  // месяц = самый частый среди колонок
+  const cnt = {}; cols.forEach(x => { const k = x.y+'-'+x.mo; cnt[k] = (cnt[k]||0)+1; });
+  const [y, mo] = Object.entries(cnt).sort((a,b) => b[1]-a[1])[0][0].split('-').map(Number);
+  const days = new Date(y, mo, 0).getDate();
+  const mcols = cols.filter(x => x.y === y && x.mo === mo);
+  const filt = aoa.slice(0, hi).map(r => String(r?.[0] ?? '')).find(s => /Фильтр подразделений/i.test(s));
+  const emps = [], byTab = {};
+  let last = null;
+  for (const r of aoa.slice(hi + 1)) {
+    if (!r) continue;
+    const tab = String(r[0] ?? '').trim(), name = String(r[1] ?? '').trim();
+    const vals = Array.from({length: days}, () => null);
+    let any = false;
+    for (const x of mcols) { const v = r[x.c]; if (v !== null && v !== undefined && String(v).trim() !== '') { vals[x.d-1] = String(v).trim(); any = true; } }
+    if (!tab && !name) {               // продолжение: вторая отметка в тот же день
+      if (last && any) vals.forEach((v,i) => { if (v) last.marks[i].push(v); });
+      continue;
+    }
+    if (byTab[tab]) {                  // тот же сотрудник в другом подразделении — берём первую строку
+      last = byTab[tab]; last.second = true;
+      vals.forEach((v,i) => { if (v && !last.marks[i].length) last.marks[i].push(v); });
+      continue;
+    }
+    last = { tab, name, dep: String(r[2] ?? '').trim(), pos: String(r[3] ?? '').trim() || 'Без должности',
+             marks: vals.map(v => v ? [v] : []), cells: [], kpi: null, normEdit: null };
+    byTab[tab] = last; emps.push(last);
+  }
+  if (!emps.length) throw new Error('В журнале нет сотрудников');
+  return { y, mo, days, emps, filter: filt ? filt.replace(/.*:\s*/, '') : '' };
+}
+
+// Минуты по одной отметке «9:11-21:21» (или «12» — часы, внесённые вручную); null — смена не закрыта
+function tbMarkMin(s, capMin) {
+  const t = String(s).replace(/\s/g, '');
+  if (/^\d+([.,]\d+)?$/.test(t)) return Math.round(parseFloat(t.replace(',', '.')) * 60);
+  const m = t.match(/^(\d{1,2}):(\d{2})[-–](\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const st = +m[1]*60 + +m[2]; let en = +m[3]*60 + +m[4];
+  if (en < st) en += 1440;
+  if (capMin != null) en = Math.min(en, capMin);
+  return Math.max(0, en - st);
+}
+const tbIsWorkday = (y, mo, d) => {
+  const dt = new Date(y, mo-1, d), wd = dt.getDay();
+  const k = String(mo).padStart(2,'0') + '-' + String(d).padStart(2,'0');
+  return wd !== 0 && wd !== 6 && !TB_HOLIDAYS.includes(k);
+};
+const tbWorkdays = (y, mo, days) => { let n = 0; for (let d = 1; d <= days; d++) if (tbIsWorkday(y, mo, d)) n++; return n; };
+
+function tbRule(pos) {
+  if (!tbRules[pos]) { tbRules[pos] = { sched:'5/2', shiftH:9, norm:'', cap:'', mode:'fact', kpi:'' }; tbSaveCfg(); tbRenderRules(); }
+  return tbRules[pos];
+}
+
+// Собираем ячейки из отметок по правилам
+function tbBuildCells(e) {
+  const { y, mo, days } = tbData, r = tbRule(e.pos);
+  const capMin = r.cap ? tbParseHM(r.cap) : null;
+  e.cells = []; e.notes = [];
+  for (let i = 0; i < days; i++) {
+    const iv = e.marks[i];
+    if (!iv.length) {
+      if (r.mode === 'sched' && r.sched === '5/2' && tbIsWorkday(y, mo, i+1)) {
+        e.cells[i] = { m: r.shiftH*60 }; e.notes[i] = 'нет отметки в журнале → по графику ' + r.shiftH;
+      } else e.cells[i] = { code:'В' };
+      continue;
+    }
+    const raw = iv.map(s => tbMarkMin(s, null)), cap = iv.map(s => tbMarkMin(s, capMin));
+    if (cap.some(v => v === null)) { e.cells[i] = { code:'?' }; e.notes[i] = iv.join(' + ') + ' — смена не закрыта, впишите часы'; continue; }
+    const rawT = raw.reduce((a,b)=>a+b,0), capT = cap.reduce((a,b)=>a+b,0);
+    const m = r.mode === 'sched' ? r.shiftH*60 : tbR5(capT);
+    let note = iv.join(' + ') + ' · факт ' + tbHM(rawT);
+    if (capT !== rawT) note += ' · до ' + r.cap + ' → ' + tbHM(capT);
+    note += r.mode === 'sched' ? ' · по графику → ' + r.shiftH : ' · округл. → ' + tbHM(m);
+    e.cells[i] = { m }; e.notes[i] = note;
+  }
+}
+
+function tbCalc(e) {
+  const { y, mo, days } = tbData, r = tbRule(e.pos);
+  const c = { fact:0, min:0, В:0, О:0, Б:0, БС:0, П:0, q:0 };
+  let absWork = 0;
+  e.cells.forEach((x, i) => {
+    if (x.m != null) { c.fact++; c.min += x.m; }
+    else if (x.code === '?') c.q++;
+    else { c[x.code] = (c[x.code]||0) + 1;
+           if (['О','Б','БС'].includes(x.code) && tbIsWorkday(y, mo, i+1)) absWork++; }
+  });
+  let norm;
+  if (e.normEdit != null && e.normEdit !== '') norm = +e.normEdit;
+  else {
+    const base = r.norm !== '' && r.norm != null ? +r.norm
+      : r.sched === '5/2' ? tbWorkdays(y, mo, days) * r.shiftH : 15 * r.shiftH;
+    norm = r.sched === '5/2' ? base - absWork * r.shiftH : base;
+  }
+  c.norm = norm;
+  c.over = Math.max(0, c.min - Math.round(norm * 60));
+  c.kpi = e.kpi != null ? e.kpi : (r.kpi === '' || r.kpi == null ? '' : +r.kpi);
+  return c;
+}
+
+function tbRecalc(rebuild) {
+  if (!tbData) return;
+  if (rebuild) tbData.emps.forEach(e => { tbBuildCells(e); e.kpi = null; e.normEdit = null; });
+  tbRenderGrid();
+}
+
+function tbRenderGrid() {
+  const { y, mo, days, emps } = tbData;
+  const dh = Array.from({length: days}, (_, i) => {
+    const wd = new Date(y, mo-1, i+1).getDay();
+    return `<th style="text-align:center;padding:6px 2px;${wd===0||wd===6?'background:var(--bg4);':''}">${i+1}</th>`;
+  }).join('');
+  let warn = 0;
+  const rows = emps.map((e, ei) => {
+    const r = tbRule(e.pos), c = tbCalc(e); warn += c.q;
+    const cells = e.cells.map((x, i) => {
+      const v = x.m != null ? tbCellTxt(x.m) : x.code;
+      const col = x.code === '?' ? 'background:var(--rbg);color:var(--red);font-weight:700;'
+               : x.code === 'О' ? 'background:var(--bbg);font-weight:700;'
+               : x.code && x.code !== 'В' ? 'background:var(--ybg);font-weight:700;' : '';
+      return `<td style="padding:2px;"><input class="tb-c" style="${col}" value="${tbEsc(v)}" title="${tbEsc(e.notes?.[i] || '')}"
+        onchange="tbEditCell(${ei},${i},this.value)"></td>`;
+    }).join('');
+    return `<tr><td style="white-space:nowrap;font-weight:600;font-size:12px;">${tbEsc(e.name)}
+        <div style="font-size:10px;color:var(--text3);font-weight:400;">${tbEsc(e.pos)}</div></td>${cells}
+      <td class="tb-n">${r.sched}</td><td class="tb-n">${c.fact}</td><td class="tb-n">${c['В']}</td><td class="tb-n">${c['О']}</td>
+      <td class="tb-n">${c['Б']}</td><td class="tb-n">${c['БС']}</td><td class="tb-n">${c['П']}</td><td class="tb-n">${days}</td>
+      <td class="tb-n" style="font-weight:700;">${tbHM(c.min)}</td>
+      <td class="tb-n"><input class="tb-c" style="width:52px;" value="${c.norm}" onchange="tbEditNorm(${ei},this.value)"></td>
+      <td class="tb-n" style="font-weight:700;color:${c.over?'var(--green)':'var(--text3)'};">${tbHM(c.over)}</td>
+      <td class="tb-n"><input class="tb-c" style="width:72px;" value="${c.kpi}" placeholder="—" onchange="tbEditKpi(${ei},this.value)"></td></tr>`;
+  }).join('');
+  document.getElementById('tbGrid').innerHTML = `<table class="tbl tb-grid"><thead><tr><th>ФИО</th>${dh}
+    <th class="tb-n">График</th><th class="tb-n">Факт дн.</th><th class="tb-n">В</th><th class="tb-n">О</th><th class="tb-n">Б</th>
+    <th class="tb-n">БС</th><th class="tb-n">П</th><th class="tb-n">Кал.</th><th class="tb-n">Часы</th><th class="tb-n">Норма</th>
+    <th class="tb-n">Перераб.</th><th class="tb-n">KPI, ₸</th></tr></thead><tbody>${rows}</tbody></table>`;
+  document.getElementById('tbWarn').innerHTML = warn
+    ? `<div class="status-box s-warn"><div class="s-icon">⚠️</div><div><div class="s-title">Незакрытые смены: ${warn}</div>
+       <div class="s-sub">Красные ячейки «?» — впишите часы вручную, иначе они не попадут в табель.</div></div></div>` : '';
+  const sel = document.getElementById('tbPEmp'), keep = sel.value;
+  sel.innerHTML = emps.map((e,i) => `<option value="${i}">${tbEsc(e.name)}</option>`).join('');
+  if (keep) sel.value = keep;
+}
+
+function tbEditCell(ei, i, val) {
+  const v = String(val).trim().toUpperCase().replace('B','В').replace('O','О');
+  const e = tbData.emps[ei];
+  if (v === '' ) e.cells[i] = { code:'В' };
+  else if (TB_CODES.includes(v)) e.cells[i] = { code:v };
+  else {
+    const hm = tbParseHM(v), n = parseFloat(v.replace(',', '.'));
+    if (hm != null) e.cells[i] = { m: hm };
+    else if (!isNaN(n) && n >= 0 && n <= 24) e.cells[i] = { m: Math.round(n*60) };
+    else { alert('Введите часы (9 или 12:10) или код: В, О, Б, БС, П'); }
+  }
+  tbRenderGrid();
+}
+function tbEditNorm(ei, v) { tbData.emps[ei].normEdit = String(v).trim() === '' ? null : +String(v).replace(',', '.'); tbRenderGrid(); }
+function tbEditKpi(ei, v)  { const t = String(v).replace(/\s/g,''); tbData.emps[ei].kpi = t === '' ? '' : +t; tbRenderGrid(); }
+function tbApplyPeriod() {
+  if (!tbData) return;
+  const ei = +document.getElementById('tbPEmp').value, code = document.getElementById('tbPCode').value;
+  let a = +document.getElementById('tbPFrom').value, b = +document.getElementById('tbPTo').value || a;
+  if (!a) { alert('Укажите день «С»'); return; }
+  if (b < a) [a, b] = [b, a];
+  for (let d = Math.max(1,a); d <= Math.min(tbData.days, b); d++) tbData.emps[ei].cells[d-1] = { code };
+  tbRenderGrid();
+}
+
+function initTabelUpload() {
+  tbLoadCfg();
+  const f = document.getElementById('tbFile'), z = document.getElementById('tbZone');
+  if (!f) return;
+  const handle = async file => {
+    z.innerHTML = '<div style="font-size:22px;">⏳</div><div style="font-size:12px;">Читаем журнал…</div>';
+    try {
+      const wb = XLSX.read(await file.arrayBuffer(), { type:'array' });
+      const aoa = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header:1, raw:false, defval:null, blankrows:false });
+      tbData = tbParseJournal(aoa);
+      tbData.emps.forEach(e => tbRule(e.pos));
+      tbRecalc(true);
+      const [kz, ru] = TB_MONTHS[tbData.mo-1];
+      document.getElementById('tbMonthLbl').value = `${ru} ${tbData.y}`;
+      z.className = 'upload-zone done';
+      z.innerHTML = `<div style="font-size:22px;">✅</div><div style="font-size:13px;font-weight:600;">${tbEsc(file.name)}</div>
+        <div style="font-size:11px;color:var(--green);margin-top:3px;">Сотрудников: ${tbData.emps.length} · ${ru} ${tbData.y}${tbData.filter ? ' · ' + tbEsc(tbData.filter) : ''}</div>`;
+      const b = document.getElementById('tbBadge'); b.className = 'badge bg'; b.textContent = `${ru} ${tbData.y}`;
+      document.getElementById('tbGridCard').style.display = '';
+    } catch (err) {
+      tbData = null; z.className = 'upload-zone';
+      z.innerHTML = `<div style="font-size:22px;">❌</div><div style="font-size:12px;color:var(--red);">${tbEsc(err.message)}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:3px;">нажмите, чтобы выбрать другой файл</div>`;
+      document.getElementById('tbGridCard').style.display = 'none';
+    }
+    f.value = '';
+  };
+  f.addEventListener('change', e => { if (e.target.files[0]) handle(e.target.files[0]); });
+  z.addEventListener('dragover', e => { e.preventDefault(); z.style.borderColor = 'var(--accent)'; });
+  z.addEventListener('dragleave', () => { z.style.borderColor = ''; });
+  z.addEventListener('drop', e => { e.preventDefault(); z.style.borderColor = ''; if (e.dataTransfer.files[0]) handle(e.dataTransfer.files[0]); });
+}
+
+// ── Выгрузка в Excel (ExcelJS — нужен для рамок, шрифтов и примечаний) ──
+function tbLoadExcelJS() {
+  if (window.ExcelJS) return Promise.resolve();
+  const urls = ['https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js',
+                'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js'];
+  return urls.reduce((p, u) => p.catch(() => new Promise((res, rej) => {
+    const s = document.createElement('script'); s.src = u; s.onload = res; s.onerror = rej; document.head.appendChild(s);
+  })), Promise.reject()).catch(() => { throw new Error('Не удалось загрузить ExcelJS — проверьте интернет'); });
+}
+
+async function tbExport() {
+  if (!tbData) return;
+  try { await tbLoadExcelJS(); } catch (e) { alert(e.message); return; }
+  const { y, mo, days, emps } = tbData, [kz, ru] = TB_MONTHS[mo-1];
+  const branch = document.getElementById('tbBranch').value.trim() || '—';
+  const wb = new ExcelJS.Workbook(), ws = wb.addWorksheet(`Табель ${ru.toLowerCase()} ${y}`, {
+    pageSetup: { paperSize:9, orientation:'landscape', fitToPage:true, fitToWidth:1, fitToHeight:0 } });
+  const TNR = (o={}) => ({ name:'Times New Roman', size:9, ...o });
+  const thin = { style:'thin' }, B = { top:thin, left:thin, bottom:thin, right:thin };
+  const ctr = { horizontal:'center', vertical:'middle', wrapText:true };
+  const D0 = 3, lastDay = D0 + 30;                      // колонки дней всегда 1..31, как в бланке
+  const keys = ['plan','fact','vyh','otp','bol','bez','prog','cal','hours','over','kpi'];
+  const COL = {}; keys.forEach((k, i) => COL[k] = lastDay + 1 + i);
+  const NC = COL.kpi, HR1 = 5, HR2 = 6, first = 7;
+  const stack = s => s.split('').join('\n');           // буквы столбиком — вертикально в любой программе
+  const L = {plan:'ПО ГРАФИКУ', fact:'ФАКТИЧЕСКИЙ', vyh:'ВЫХОДНОЙ', otp:'ОТПУСК', bol:'БОЛЬН.ЛИСТ', bez:'БЕЗСОДЕРЖ.',
+             prog:'ПРОГУЛ', cal:'КАЛЕНД.ДНЕЙ', hours:'ОБЩИЕ ЧАСЫ', over:'ПЕРЕРАБОТКИ', kpi:'KPI, ТГ'};
+
+  ws.getCell('A1').value = '"Tap-Tatti Almaty" ЖШС'; ws.getCell('A1').font = TNR({ size:10, bold:true });
+  ws.getCell('A2').value = { richText: [ { text:'Бөлімше ', font:TNR({ size:10 }) }, { text:branch, font:TNR({ size:10, bold:true, italic:true }) } ] };
+  ws.getCell(3, 12).value = `${kz} / ${ru}  ${y} жыл / год`; ws.getCell(3, 12).font = TNR({ size:10, bold:true });
+
+  ws.mergeCells(HR1, 1, HR2, 1); ws.getCell(HR1, 1).value = 'р/№';
+  ws.mergeCells(HR1, 2, HR2, 2); ws.getCell(HR1, 2).value = 'Аты-жөні / ФИО';
+  ws.mergeCells(HR1, D0, HR1, lastDay); ws.getCell(HR1, D0).value = 'Күндер / Дни';
+  for (let d = 1; d <= 31; d++) {
+    const cell = ws.getCell(HR2, D0 + d - 1); cell.value = d <= days ? d : null;
+    if (d <= days && [0,6].includes(new Date(y, mo-1, d).getDay())) cell.fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFEDEDED' } };
+  }
+  ws.mergeCells(HR1, COL.plan, HR1, COL.fact); ws.getCell(HR1, COL.plan).value = 'РАБ.ДН';
+  ws.mergeCells(HR1, COL.vyh, HR1, COL.prog);  ws.getCell(HR1, COL.vyh).value = 'НЕ ЯВКИ';
+  for (const k of keys) {
+    if (['cal','hours','over','kpi'].includes(k)) { ws.mergeCells(HR1, COL[k], HR2, COL[k]); ws.getCell(HR1, COL[k]).value = stack(L[k]); }
+    else ws.getCell(HR2, COL[k]).value = stack(L[k]);
+  }
+  for (const r of [HR1, HR2]) for (let c = 1; c <= NC; c++) {
+    const cell = ws.getCell(r, c); cell.border = B; cell.alignment = ctr;
+    cell.font = TNR({ bold:true, size: (c > lastDay && (r === HR2 || ['cal','hours','over','kpi'].some(k => COL[k] === c))) ? 8 : 9 });
+  }
+  ws.getRow(HR2).height = 128;
+
+  emps.forEach((e, idx) => {
+    const r = first + idx, rule = tbRule(e.pos), c = tbCalc(e);
+    ws.getRow(r).height = 22;
+    ws.getCell(r, 1).value = idx + 1;
+    ws.getCell(r, 2).value = e.name;
+    e.cells.forEach((x, i) => {
+      const cell = ws.getCell(r, D0 + i);
+      if (x.m != null) { cell.value = x.m / 1440; cell.numFmt = x.m % 60 ? 'h:mm' : 'h'; }
+      else if (x.code !== '?') {
+        cell.value = x.code;
+        if (x.code === 'О') { cell.fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFDDEBF7' } }; }
+      }
+      if (e.notes?.[i]) cell.note = e.notes[i];
+    });
+    const ref = `${ws.getColumn(D0).letter}${r}:${ws.getColumn(lastDay).letter}${r}`;
+    const Mh = `ROUND(SUM(${ref})*1440,0)`, normMin = Math.round(c.norm * 60), Mo = `MAX(0,${Mh}-${normMin})`;
+    ws.getCell(r, COL.plan).value = rule.sched;
+    ws.getCell(r, COL.fact).value = { formula:`COUNT(${ref})`, result:c.fact };
+    ws.getCell(r, COL.vyh).value  = { formula:`COUNTIF(${ref},"В")`, result:c['В'] };
+    ws.getCell(r, COL.otp).value  = { formula:`COUNTIF(${ref},"О")`, result:c['О'] };
+    if (c['Б'])  ws.getCell(r, COL.bol).value  = c['Б'];
+    if (c['БС']) ws.getCell(r, COL.bez).value  = c['БС'];
+    if (c['П'])  ws.getCell(r, COL.prog).value = c['П'];
+    ws.getCell(r, COL.cal).value = days;
+    // итоги текстом «216:05» — так их одинаково показывают Excel, Google Таблицы и iPhone
+    ws.getCell(r, COL.hours).value = { formula:`INT(${Mh}/60)&":"&TEXT(MOD(${Mh},60),"00")`, result:tbHM(c.min) };
+    ws.getCell(r, COL.over).value  = { formula:`INT(${Mo}/60)&":"&TEXT(MOD(${Mo},60),"00")`, result:tbHM(c.over) };
+    if (c.kpi !== '' && c.kpi != null) { ws.getCell(r, COL.kpi).value = c.kpi; ws.getCell(r, COL.kpi).numFmt = '# ##0'; }
+    for (let col = 1; col <= NC; col++) {
+      const cell = ws.getCell(r, col); cell.border = B;
+      cell.alignment = col === 2 ? { vertical:'middle', wrapText:true } : ctr;
+      cell.font = TNR({ bold: !!(cell.font && cell.font.bold) });
+      if (col >= D0 && col <= lastDay && ['О'].includes(e.cells[col - D0]?.code)) cell.font = TNR({ bold:true });
+    }
+  });
+
+  ws.getColumn(1).width = 4; ws.getColumn(2).width = 30;
+  for (let c = D0; c <= lastDay; c++) ws.getColumn(c).width = 5.2;
+  for (const k of keys) ws.getColumn(COL[k]).width = 6.5;
+  ws.getColumn(COL.hours).width = 8; ws.getColumn(COL.over).width = 8; ws.getColumn(COL.kpi).width = 9;
+  ws.views = [{ state:'frozen', xSplit:2, ySplit:HR2 }];
+
+  const buf = await wb.xlsx.writeBuffer();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([buf], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+  a.download = `Табель_${branch.replace(/[\\/:*?"<>|\s]+/g,'_')}_${ru.toLowerCase()}_${y}.xlsx`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+
+document.addEventListener('DOMContentLoaded', initTabelUpload);
 </script>
 </body>
 </html>
