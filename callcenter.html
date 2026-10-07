@@ -192,6 +192,7 @@ body{font-family:var(--sans);letter-spacing:-.01em;background:var(--bg);color:va
 .txn-item:hover { border-color:var(--text3); }
 .txn-item.prepay { background:rgba(109,94,240,.07); border-color:rgba(109,94,240,.28); }
 .txn-item.daily  { background:rgba(22,163,74,.06); border-color:rgba(22,163,74,.22); }
+.txn-item.extra  { background:rgba(234,179,8,.08);  border-color:rgba(234,179,8,.30); }
 
 .txn-chk {
   width:22px; height:22px; border-radius:50%; border:2px solid #d9d5d0;
@@ -200,6 +201,7 @@ body{font-family:var(--sans);letter-spacing:-.01em;background:var(--bg);color:va
 }
 .txn-item.prepay .txn-chk { border-color:var(--accent); background:var(--accent); color:#fff; }
 .txn-item.daily  .txn-chk { border-color:var(--green);  background:var(--green);  color:#fff; }
+.txn-item.extra  .txn-chk { border-color:var(--yellow); background:var(--yellow); color:#1a1a1a; }
 
 .txn-time { font-family:var(--mono); font-size:12px; color:var(--text3); width:48px; flex-shrink:0; }
 .txn-body { flex:1; min-width:0; }
@@ -207,6 +209,7 @@ body{font-family:var(--sans);letter-spacing:-.01em;background:var(--bg);color:va
 .txn-item:not(.prepay):not(.daily) .txn-amt { color:var(--text2); }
 .txn-item.prepay .txn-amt { color:var(--a2); }
 .txn-item.daily  .txn-amt { color:var(--green); }
+.txn-item.extra  .txn-amt { color:var(--yellow); }
 .txn-meta { font-size:11px; color:var(--text3); margin-top:2px; }
 .txn-note { background:none; border:none; outline:none; font-size:11px; color:var(--text2); font-family:var(--sans); width:100%; margin-top:2px; }
 .txn-note::placeholder { color:var(--text3); }
@@ -214,6 +217,7 @@ body{font-family:var(--sans);letter-spacing:-.01em;background:var(--bg);color:va
 .tt-p { background:var(--glow); color:var(--a2); }
 .tt-d { background:var(--gbg); color:var(--green); }
 .tt-n { background:var(--bg4); color:var(--text2); }
+.tt-e { background:var(--ybg); color:var(--yellow); }
 .txn-tag.br { background:var(--rbg); color:var(--red); }
 
 /* Prepay date row inside txn-item */
@@ -223,6 +227,12 @@ body{font-family:var(--sans);letter-spacing:-.01em;background:var(--bg);color:va
   gap:8px; flex-wrap:wrap; align-items:center;
 }
 .txn-item.prepay .txn-pp-row { display:flex; }
+.txn-ex-row { display:none; margin-top:8px; padding-top:8px;
+  border-top:1px solid rgba(234,179,8,.25); gap:8px; flex-wrap:wrap; align-items:center; }
+.txn-item.extra .txn-ex-row { display:flex; }
+.txn-ex-row label { font-size:10px; color:var(--yellow); font-weight:600; text-transform:uppercase; letter-spacing:.5px; }
+.txn-ex-num { background:var(--bg2); border:1px solid rgba(234,179,8,.35); border-radius:8px;
+  padding:5px 9px; font-size:12px; color:var(--text); font-family:var(--mono); outline:none; width:110px; }
 .txn-pp-row label { font-size:10px; color:var(--a2); font-weight:600; text-transform:uppercase; letter-spacing:.5px; }
 .txn-pp-date {
   background:var(--bg2); border:1px solid rgba(109,94,240,.35); border-radius:8px;
@@ -694,6 +704,10 @@ details[open] > summary .chev { transform:rotate(90deg); }
               <div class="sv-row">
                 <div class="sv-label" style="color:var(--text3);">🔵 Предоплаты за будущую дату</div>
                 <div class="sv-val" id="iiko-future" style="color:var(--text3);">0 ₸</div>
+              </div>
+              <div class="sv-row" id="iiko-extra-row" style="display:none;">
+                <div class="sv-label" style="color:var(--yellow);">➕ Доплаты к прошлым заказам <span style="font-weight:400;color:var(--text3);font-size:11px;">(вычитаются из переноса)</span></div>
+                <div class="sv-val" id="iiko-extra" style="color:var(--yellow);">0 ₸</div>
               </div>
               <div class="sv-row" id="iiko-unset-row" style="display:none;">
                 <div class="sv-label" style="color:var(--yellow);">⚪ Не размечено</div>
@@ -1251,7 +1265,7 @@ const lss = (k,v) => localStorage.setItem(k,v);
 
 function loadDemoData() {
   txns = DEMO.txns.map(t => ({...t}));
-  txns.forEach(t => { states[t.id] = 'none'; meta[t.id] = {orderDate:'', client:'', note:''}; });
+  txns.forEach(t => { states[t.id] = 'none'; meta[t.id] = {orderDate:'', client:'', note:'', orderNum:''}; });
   document.getElementById('rDate').value = DEMO.date;
   showKassaMain();
   renderAll();
@@ -1288,7 +1302,7 @@ function renderTxns() {
     const div = document.createElement('div');
     div.className = 'txn-item' + (s !== 'none' ? ' ' + s : '');
     div.innerHTML = `
-      <div class="txn-chk">${s==='prepay'?'П':s==='daily'?'✓':''}</div>
+      <div class="txn-chk">${s==='prepay'?'П':s==='daily'?'✓':s==='extra'?'+':''}</div>
       <div class="txn-time">${t.time.slice(0,5)}</div>
       <div class="txn-body">
         <div class="txn-amt" ${t.isRefund?'style="color:var(--red)"':''}>${t.isRefund?'↩ ':''}${kFmt(t.amount)}</div>
@@ -1302,8 +1316,16 @@ function renderTxns() {
           <input class="pp-note" placeholder="клиент / комментарий" value="${m.client||''}"
             oninput="meta[${t.id}].client=this.value">
         </div>
+        <div class="txn-ex-row" onclick="event.stopPropagation()">
+          <label>Доплата к заказу №</label>
+          <input class="txn-ex-num" placeholder="4799" value="${m.orderNum||''}"
+            oninput="meta[${t.id}].orderNum=this.value;renderSverka()">
+          <input class="pp-note" placeholder="за что доплатили" value="${m.client||''}"
+            oninput="meta[${t.id}].client=this.value">
+        </div>
       </div>
-      <div class="txn-tag ${t.isRefund?'br':s==='prepay'?'tt-p':s==='daily'?'tt-d':'tt-n'}">${t.isRefund?'Возврат':s==='prepay'?'Предоплата':s==='daily'?'Дневной':'—'}</div>`;
+      <div class="txn-tag ${t.isRefund?'br':s==='prepay'?'tt-p':s==='daily'?'tt-d':s==='extra'?'tt-e':'tt-n'}">${
+        s==='extra'?'Доплата':t.isRefund?'Возврат':s==='prepay'?'Предоплата':s==='daily'?'Дневной':'—'}</div>`;
     div.addEventListener('click', () => cycleTxn(t.id));
     list.appendChild(div);
   });
@@ -1311,7 +1333,8 @@ function renderTxns() {
 
 function cycleTxn(id) {
   const cur = states[id];
-  states[id] = cur==='none' ? 'prepay' : cur==='prepay' ? 'daily' : 'none';
+  // none → предоплата → дневной → доплата к прошлому заказу → сброс
+  states[id] = cur==='none' ? 'prepay' : cur==='prepay' ? 'daily' : cur==='daily' ? 'extra' : 'none';
   renderAll();
 }
 
@@ -1615,6 +1638,12 @@ function renderIiko() {
   const futurePrepays = txns.filter(t => states[t.id]==='prepay' && meta[t.id]?.orderDate && meta[t.id].orderDate > shiftDate);
   const futurePrepayAmt = futurePrepays.reduce((s,t)=>s+t.amount,0);
 
+  // Доплата к заказу прошлой смены: в сумме заказа она уже учтена, а значит
+  // сидит и в «переносе». Деньги пришли сегодня, поэтому из ожидаемого
+  // вычитаем — иначе одна и та же тысяча посчитается дважды.
+  const extras = txns.filter(t => states[t.id]==='extra');
+  const extraAmt = extras.reduce((s,t)=>s+t.amount,0);
+
   // ── Сопоставление с отчётом (по дате принятия заказа) ──
   matchRes = null;
   const warn = el('iikoWarn'), mb = el('matchBlock');
@@ -1645,13 +1674,19 @@ function renderIiko() {
   const carryAmt   = matchRes ? matchRes.deliveredTodayAmt   : (window._carryoverAmt   || 0);
   const carryCount = matchRes ? matchRes.deliveredToday.length : (window._carryoverCount || 0);
 
-  const expected = totalKaspi + carryAmt - futurePrepayAmt;
+  const expected = totalKaspi + carryAmt - futurePrepayAmt - extraAmt;
 
   el('iiko-daily').textContent    = kFmt(dailyAmt);
   el('iiko-today-row').style.display = todayPrepayAmt ? '' : 'none';
   el('iiko-today').textContent    = todayPrepayAmt ? `${kFmt(todayPrepayAmt)} (${todayPrepays.length} шт)` : '0 ₸';
   el('iiko-future').textContent   = futurePrepayAmt ? `${kFmt(futurePrepayAmt)} (${futurePrepays.length} шт)` : '0 ₸';
   el('iiko-expected').textContent = kFmt(expected);
+  el('iiko-extra-row').style.display = extras.length ? '' : 'none';
+  if (extras.length) {
+    const nums = [...new Set(extras.map(t => meta[t.id]?.orderNum).filter(Boolean))];
+    el('iiko-extra').textContent = `${kFmt(extraAmt)} (${extras.length} шт)` +
+      (nums.length ? ` · №${nums.join(', №')}` : '');
+  }
   el('iiko-unset-row').style.display = unsetN ? '' : 'none';
   if (unsetN) el('iiko-unset').textContent = `${kFmt(unsetAmt)} (${unsetN} шт)`;
 
@@ -4084,7 +4119,14 @@ function renderMatchLists(r, shiftDate) {
 
   if (r.kaspiOnly.length)
     html += box('var(--yellow)', '❗ Оплата в кассе есть — заказа этой даты нет', `${r.kaspiOnly.length} шт · ${kFmt(r.kaspiOnly.reduce((s,t)=>s+t.amount,0))}`,
-      r.kaspiOnly.map(t => row(t.time.slice(0,5), t.isRefund ? 'возврат' : 'нет заказа с такой суммой', { txt: kFmt(t.amount), style: t.amount<0?'color:var(--red)':'color:var(--yellow)' })).join(''));
+      r.kaspiOnly.map(t => {
+        // Платёж, отмеченный как доплата, уже объяснён — показываем это
+        const ex = states[t.id] === 'extra';
+        const num = meta[t.id]?.orderNum;
+        return row(t.time.slice(0,5),
+          ex ? `доплата к заказу${num ? ' №' + num : ''}` : (t.isRefund ? 'возврат' : 'нет заказа с такой суммой'),
+          { txt: kFmt(t.amount), style: ex ? 'color:var(--text3)' : (t.amount<0?'color:var(--red)':'color:var(--yellow)') });
+      }).join(''));
 
   if (r.foreign.length)
     html += box('var(--a2)', 'ℹ️ Доплата за заказ, принятый раньше', `${r.foreign.length} шт · ${kFmt(r.foreign.reduce((s,f)=>s+f.order.sum,0))}`,
