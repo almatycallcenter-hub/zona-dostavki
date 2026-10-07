@@ -644,6 +644,7 @@ details[open] > summary .chev { transform:rotate(90deg); }
               <div class="sv-row"><div class="sv-label">💳 Kaspi Pay итого</div><div class="sv-val" id="sv-tot">—</div></div>
               <div class="sv-row"><div class="sv-label">🟢 Дневные заказы</div><div class="sv-val" id="sv-day" style="color:var(--green)">0 ₸</div></div>
               <div class="sv-row"><div class="sv-label">🔵 Предоплаты</div><div class="sv-val" id="sv-pre" style="color:var(--a2)">0 ₸</div></div>
+              <div class="sv-row" id="sv-ext-row" style="display:none"><div class="sv-label">➕ Доплаты к прошлым заказам</div><div class="sv-val" id="sv-ext" style="color:var(--yellow)">0 ₸</div></div>
               <div class="sv-row"><div class="sv-label">⬜ Не размечено</div><div class="sv-val" id="sv-un" style="color:var(--text3)">—</div></div>
               <div class="divider"></div>
               <div class="sv-row sv-total"><div class="sv-label">Расхождение</div><div class="sv-val" id="sv-diff" style="color:var(--text3)">—</div></div>
@@ -1352,6 +1353,11 @@ function renderSverka() {
   const total   = txns.reduce((s,t) => s+t.amount, 0);
   const daily   = txns.filter(t => states[t.id]==='daily').reduce((s,t)  => s+t.amount, 0);
   const prepay  = txns.filter(t => states[t.id]==='prepay').reduce((s,t) => s+t.amount, 0);
+  // Доплата к заказу прошлой смены — это тоже деньги, пришедшие сегодня.
+  // В кассовой сверке она отдельная строка, но в сумму входит наравне
+  // с дневными и предоплатами, иначе касса покажет ложное расхождение.
+  const extra   = txns.filter(t => states[t.id]==='extra').reduce((s,t)  => s+t.amount, 0);
+  const ec = txns.filter(t=>states[t.id]==='extra').length;
   const unset   = txns.filter(t => states[t.id]==='none');
   const unsetAmt= unset.reduce((s,t) => s+t.amount, 0);
   const dc = txns.filter(t=>states[t.id]==='daily').length;
@@ -1368,6 +1374,8 @@ function renderSverka() {
   document.getElementById('sv-tot').textContent = kFmt(total);
   document.getElementById('sv-day').textContent = kFmt(daily);
   document.getElementById('sv-pre').textContent = kFmt(prepay);
+  document.getElementById('sv-ext-row').style.display = ec ? '' : 'none';
+  document.getElementById('sv-ext').textContent = kFmt(extra) + (ec ? ' (' + ec + ' шт)' : '');
   document.getElementById('sv-un').textContent  = unset.length ? kFmt(unsetAmt) + ' (' + unset.length + ' шт)' : '—';
 
   const closeBtn = document.getElementById('closeBtn');
@@ -1383,15 +1391,15 @@ function renderSverka() {
     sb.className='status-box s-warn';
     sb.innerHTML=`<div class="s-icon">⚠️</div><div><div class="s-title">Осталось разметить: ${unset.length} транзакций</div><div class="s-sub">Нажмите на транзакцию: Предоплата → Дневной → сброс</div></div>`;
     closeBtn.disabled = true;
-  } else if (total === daily + prepay) {
+  } else if (total === daily + prepay + extra) {
     diffEl.textContent='✓ 0 ₸ — сходится'; diffEl.style.color='var(--green)';
     badge.className='badge bg'; badge.textContent='✅ Сходится';
     diffCard.className='kpi g';
     sb.className='status-box s-ok';
-    sb.innerHTML=`<div class="s-icon">✅</div><div><div class="s-title">Касса сходится!</div><div class="s-sub">Дневные (${kFmt(daily)}) + Предоплаты (${kFmt(prepay)}) = ${kFmt(total)}</div></div>`;
+    sb.innerHTML=`<div class="s-icon">✅</div><div><div class="s-title">Касса сходится!</div><div class="s-sub">Дневные (${kFmt(daily)}) + Предоплаты (${kFmt(prepay)})${ec?' + Доплаты ('+kFmt(extra)+')':''} = ${kFmt(total)}</div></div>`;
     closeBtn.disabled = false;
   } else {
-    const diff = total - daily - prepay;
+    const diff = total - daily - prepay - extra;
     diffEl.textContent=kFmt(Math.abs(diff))+(diff>0?' — излишек':' — недостача'); diffEl.style.color='var(--red)';
     badge.className='badge br'; badge.textContent='❌ Расхождение';
     diffCard.className='kpi r';
