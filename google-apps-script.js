@@ -73,13 +73,16 @@ function doPost(e) {
 // ════════════════════════════════════════════════════════════
 function saveShift(data) {
   const headers = [
-    'Дата', 'Оператор', 'Итого Kaspi (₸)', 'Дневные (₸)',
+    'Дата', 'Оператор', 'Итого Kaspi (₸)', 'Дневные (₸)', 'Доплаты (₸)',
     'Предоплаты сегодня (₸)', 'Предоплаты будущие (₸)',
     'Ожидаемый iiko (₸)', 'Фактический iiko (₸)', 'Расхождение iiko (₸)',
     'Кол-во транзакций', 'Статус сверки', 'Статус iiko', 'Комментарий',
     'Время записи'
   ];
   const sheet = getOrCreateSheet(SHEET_SHIFTS, headers);
+  // Лист мог быть создан до появления доплат — тогда вставляем колонку,
+  // старые строки сами сдвигаются и получают пустую ячейку.
+  ensureColumn(sheet, 'Доплаты (₸)', 4);
 
   const kaspi      = data.totalKaspi   || 0;
   const daily      = data.totalDaily   || 0;
@@ -89,7 +92,10 @@ function saveShift(data) {
   const actIiko    = data.actualIiko   || 0;
   const diffIiko   = actIiko > 0 ? actIiko - expIiko : '';
 
-  const sverkaStatus = (kaspi === daily + (data.totalPrepay || 0))
+  // Доплаты к заказам прошлых смен — такие же сегодняшние деньги,
+  // поэтому в балансе кассы они стоят рядом с дневными и предоплатами.
+  const extra = data.totalExtra || 0;
+  const sverkaStatus = (kaspi === daily + (data.totalPrepay || 0) + extra)
     ? '✅ Сходится' : '❌ Расхождение';
   const iikoStatus = actIiko > 0
     ? (diffIiko === 0 ? '✅ Сходится' : '❌ ' + formatNum(Math.abs(diffIiko)) + ' ₸')
@@ -98,7 +104,7 @@ function saveShift(data) {
   const newRow = [
     asText(data.date),
     data.operator    || '',
-    kaspi, daily, prepToday, prepFuture, expIiko,
+    kaspi, daily, extra, prepToday, prepFuture, expIiko,
     actIiko || '', diffIiko,
     data.txnCount    || 0,
     sverkaStatus, iikoStatus,
@@ -608,6 +614,20 @@ function fillCatalogFromCode() {
 // ════════════════════════════════════════════════════════════
 //  Вспомогательные функции
 // ════════════════════════════════════════════════════════════
+// Добавляет колонку после afterCol, если её ещё нет в шапке.
+// Нужна для листов, созданных прошлой версией скрипта.
+function ensureColumn(sheet, title, afterCol) {
+  const last = sheet.getLastColumn();
+  if (last === 0) return;
+  const head = sheet.getRange(1, 1, 1, last).getValues()[0];
+  if (head.indexOf(title) !== -1) return;
+  sheet.insertColumnAfter(afterCol);
+  const cell = sheet.getRange(1, afterCol + 1);
+  cell.setValue(title);
+  cell.setBackground('#1a237e').setFontColor('#ffffff').setFontWeight('bold');
+  SpreadsheetApp.flush();
+}
+
 function getOrCreateSheet(name, headers) {
   const ss = SpreadsheetApp.openById(SHEET_ID);
   let sheet = ss.getSheetByName(name);

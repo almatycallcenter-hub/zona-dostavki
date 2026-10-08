@@ -4199,6 +4199,9 @@ async function closeShift() {
   const total   = txns.reduce((s,t)=>s+t.amount,0);
   const daily   = txns.filter(t=>states[t.id]==='daily').reduce((s,t)=>s+t.amount,0);
   const prepay  = txns.filter(t=>states[t.id]==='prepay').reduce((s,t)=>s+t.amount,0);
+  // Доплаты к заказам прошлых смен: деньги сегодняшние, но заказ уже сидит
+  // в переносе, поэтому из ожидаемого iiko их нужно вычесть.
+  const extraAmt = txns.filter(t=>states[t.id]==='extra').reduce((s,t)=>s+t.amount,0);
 
   // iiko data
   const prepayTodayLocal = txns.filter(t=>states[t.id]==='prepay' && meta[t.id]?.orderDate===date).reduce((s,t)=>s+t.amount,0);
@@ -4206,17 +4209,19 @@ async function closeShift() {
   // Перенос: из отчёта 0080, если он загружен, иначе из localStorage / Google Таблицы
   const carryAmt         = matchRes ? matchRes.deliveredTodayAmt : (window._carryoverAmt || 0);
   const prepayToday      = prepayTodayLocal + carryAmt; // предоплаты за сегодня = из текущего PDF + перенос из прошлых смен
-  const expectedIiko     = total + carryAmt - prepayFuture;
+  const expectedIiko     = total + carryAmt - prepayFuture - extraAmt;
   const actualIiko   = parseInt(document.getElementById('iikoActual')?.value || '0', 10) || 0;
 
   try {
     await fetch(url, {method:'POST', mode:'no-cors', body:JSON.stringify({
       type:'shift', date, operator:op, comment,
-      totalKaspi:total, totalDaily:daily, totalPrepay:prepay,
+      totalKaspi:total, totalDaily:daily, totalPrepay:prepay, totalExtra:extraAmt,
       prepayToday, prepayFuture, expectedIiko, actualIiko,
       txnCount:txns.length,
       prepayCount:txns.filter(t=>states[t.id]==='prepay').length,
       dailyCount:txns.filter(t=>states[t.id]==='daily').length,
+      extraCount:txns.filter(t=>states[t.id]==='extra').length,
+      extraOrders:[...new Set(txns.filter(t=>states[t.id]==='extra').map(t=>meta[t.id]?.orderNum).filter(Boolean))].join(', '),
     })});
     await fetch(url, {method:'POST', mode:'no-cors', body:JSON.stringify({
       type:'transactions', date, operator:op,
