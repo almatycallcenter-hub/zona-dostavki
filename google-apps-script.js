@@ -61,10 +61,53 @@ function doPost(e) {
       return jsonResponse({ status: 'ok', message: 'Транзакции сохранены' });
     }
 
+    if (data.type === 'shot') {
+      saveShot(data);
+      return jsonResponse({ status: 'ok', message: 'Снимок сохранён' });
+    }
+
     return jsonResponse({ status: 'error', message: 'Неизвестный тип данных' });
 
   } catch (err) {
     return jsonResponse({ status: 'error', message: err.message });
+  }
+}
+
+// ════════════════════════════════════════════════════════════
+//  Снимок экрана незакрытых заказов → Google Drive
+//  Кладём рядом с таблицей, ссылку пишем в строку смены.
+// ════════════════════════════════════════════════════════════
+function saveShot(data) {
+  const b64 = String(data.image || '').replace(/^data:image\/\w+;base64,/, '');
+  if (!b64) throw new Error('Пустой снимок');
+
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const parent = DriveApp.getFileById(SHEET_ID).getParents();
+  const root = parent.hasNext() ? parent.next() : DriveApp.getRootFolder();
+  const it = root.getFoldersByName('Снимки смен');
+  const folder = it.hasNext() ? it.next() : root.createFolder('Снимки смен');
+
+  const blob = Utilities.newBlob(Utilities.base64Decode(b64), 'image/jpeg',
+                 'Смена ' + asText(data.date) + ' — ' + (data.operator || '') + '.jpg');
+  // Старый снимок за эту же дату заменяем, иначе папка зарастёт дублями
+  const old = folder.getFilesByName(blob.getName());
+  while (old.hasNext()) old.next().setTrashed(true);
+  const file = folder.createFile(blob);
+
+  const sheet = ss.getSheetByName(SHEET_SHIFTS);
+  if (!sheet) return;
+  ensureColumn(sheet, 'Снимок', sheet.getLastColumn() - 1);
+  const head = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const cShot = head.indexOf('Снимок');
+  if (cShot < 0) return;
+  const rows = sheet.getRange(2, 1, Math.max(sheet.getLastRow() - 1, 1), 1).getValues();
+  for (let i = 0; i < rows.length; i++) {
+    const d = String(rows[i][0]).replace(/^'/, '').trim();
+    if (d === String(data.date)) {
+      sheet.getRange(i + 2, cShot + 1).setFormula(
+        '=HYPERLINK("' + file.getUrl() + '";"открыть")');
+      break;
+    }
   }
 }
 
