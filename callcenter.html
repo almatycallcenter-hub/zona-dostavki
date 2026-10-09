@@ -4726,6 +4726,24 @@ async function ordAddFile(file) {
   throw new Error('не похоже ни на «Банкеты», ни на 0080, ни на «Отчёт по блюдам»');
 }
 
+// Отменённый заказ состава не имеет — это не пробел в данных
+const ordCancelled = o => /отмен/i.test(o.status || '');
+const dishKey = d => String(d || '').toLowerCase().replace(/\s+/g,' ').trim();
+
+// Вычитает из общего списка блюд то, что уже точно разнесено по заказам.
+// Возвращает остаток или null, если хоть одна позиция не нашлась —
+// тогда вычитанию верить нельзя и группа остаётся спорной.
+function ordSubtract(pool, knownItems) {
+  const rest = pool.map(i => ({ dish:i.dish, qty:i.qty }));
+  for (const ki of knownItems) {
+    const j = rest.findIndex(r => dishKey(r.dish) === dishKey(ki.dish) && r.qty > 0);
+    if (j < 0) return null;
+    rest[j].qty -= (ki.qty || 0);
+    if (rest[j].qty < 0) return null;
+  }
+  return rest.filter(r => r.qty > 0);
+}
+
 // ── Склейка по времени для того, что осталось ─────
 function ordJoinByTime() {
   ordClash = [];
@@ -4738,13 +4756,30 @@ function ordJoinByTime() {
   });
   Object.keys(byTime).forEach(k => {
     const g = groups[k] || [];
+    if (!g.length) return;
     if (g.length === 1) {
       const n = g[0].num;
       if (!ordItems[n] || ordItems[n].src !== 'exact')
         ordItems[n] = { items: byTime[k], src:'time' };
-    } else if (g.length > 1) {
-      // Разводить нечем: ни цены, ни номера в «Отчёте по блюдам» нет
-      ordClash.push({ key:k, nums: g.map(o => o.num) });
+      return;
+    }
+    // На одну минуту пришлось несколько заказов. Те, чей состав уже известен
+    // точно (0080 или файл по одному заказу), вычитаем из общего списка —
+    // часто после этого остаётся ровно один заказ, и остаток принадлежит ему.
+    const known   = g.filter(o => ordItems[o.num] && ordItems[o.num].src === 'exact');
+    const unknown = g.filter(o => !ordItems[o.num] && !ordCancelled(o));
+    if (!unknown.length) return;
+    let rest = byTime[k];
+    if (known.length) {
+      const sub = ordSubtract(byTime[k], [].concat(...known.map(o => ordItems[o.num].items)));
+      if (sub === null) { ordClash.push({ key:k, nums: unknown.map(o=>o.num), items: byTime[k] }); return; }
+      rest = sub;
+    }
+    if (unknown.length === 1) {
+      ordItems[unknown[0].num] = { items: rest, src:'time' };
+    } else {
+      ordClash.push({ key:k, nums: unknown.map(o=>o.num), items: rest });
+      unknown.forEach(o => { ordItems[o.num] = { items: rest, src:'clash' }; });
     }
   });
 }
@@ -4771,16 +4806,17 @@ function renderOrders() {
     return;
   }
 
-  let exact = 0, guess = 0, none = 0;
+  let exact = 0, guess = 0, none = 0, canc = 0;
   list.forEach(o => {
     const it = ordItems[o.num];
+    if (ordCancelled(o)) { canc++; return; }
     if (it && it.src === 'exact') exact++;
     else if (it) guess++;
     else none++;
   });
 
   badge.className = ordClash.length ? 'badge by' : 'badge bg';
-  badge.textContent = ordClash.length ? 'Есть спорные' : 'Готово';
+  badge.textContent = ordClash.length ? 'Спорных групп: ' + ordClash.length : 'Готово';
 
   sum.innerHTML = `<div class="card">
     <div class="kpi-row">
@@ -4789,22 +4825,27 @@ function renderOrders() {
         <div class="kpi-sub">0080 или файл по одному заказу</div></div>
       <div class="kpi y"><div class="kpi-label">Состав по времени</div><div class="kpi-val">${guess}</div>
         <div class="kpi-sub">склейка, не доказано</div></div>
-      <div class="kpi"><div class="kpi-label">Без состава</div><div class="kpi-val">${none}</div></div>
+      <div class="kpi"><div class="kpi-label">Отменённые</div><div class="kpi-val">${canc}</div>
+        <div class="kpi-sub">состава нет и не должно быть</div></div>
+      <div class="kpi ${none ? 'r' : ''}"><div class="kpi-label">Без состава</div><div class="kpi-val">${none}</div></div>
     </div>
     ${ordClash.length ? `<div class="status-box s-warn" style="margin-top:12px;">
       <div class="s-icon">⚠️</div><div>
         <div class="s-title">На одно время пришлось несколько заказов</div>
         <div class="s-sub">${ordClash.map(c => c.key + ' — №' + c.nums.join(', №')).join(' · ')}.
-        Развести нечем: в «Отчёте по блюдам» нет ни номера, ни цены.
-        Выгрузите эти заказы по одному — номер возьмётся из заголовка файла.</div>
+        У этих заказов состав показан общим списком на всю группу.
+        Чтобы развести: догрузите 0080 (он закроет все закрытые заказы)
+        или выгрузите спорные по одному — номер возьмётся из заголовка файла.</div>
       </div></div>` : ''}
   </div>`;
 
   box.innerHTML = list.map(o => {
     const it   = ordItems[o.num];
     const src  = !it ? 'none' : it.src === 'exact' ? 'exact' : 'guess';
-    const sLbl = !it ? 'состава нет' : it.src === 'exact' ? 'точно' : 'по времени';
-    const open = o.status && !/закрыт/i.test(o.status);
+    const sLbl = !it ? (ordCancelled(o) ? 'отменён' : 'состава нет')
+               : it.src === 'exact' ? 'точно'
+               : it.src === 'clash' ? 'общий список на группу' : 'по времени';
+    const open = o.status && !/закрыт|отмен/i.test(o.status);
     const clash = ordClash.some(c => c.nums.includes(o.num));
     return `<div class="ord-card ${clash ? 'warn' : ''} ${open ? 'open' : ''}">
       <div class="ord-top">
