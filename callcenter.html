@@ -168,6 +168,32 @@ body{font-family:var(--sans);letter-spacing:-.01em;background:var(--bg);color:va
 .upload-zone.done { border-style:solid; }
 .upload-zone.done  { border-color:var(--green);  background:var(--gbg);  }
 
+/* ── Заказы ─────────────────────────────────────────────── */
+.ord-file { display:flex; align-items:center; gap:8px; padding:7px 10px; border-radius:8px;
+            background:var(--bg2); margin-top:6px; font-size:12px; }
+.ord-file .nm { font-weight:600; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ord-file .tp { color:var(--text3); font-size:11px; }
+.ord-card { border:1px solid var(--border); border-radius:12px; padding:12px 14px; margin-top:10px;
+            background:var(--bg3); }
+.ord-card.warn { border-color:var(--yellow); }
+.ord-card.open { border-left:4px solid var(--a2); }
+.ord-top { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
+.ord-num { font-weight:800; font-size:15px; }
+.ord-cl  { font-weight:600; }
+.ord-ph  { color:var(--text3); font-size:12px; }
+.ord-sum { margin-left:auto; font-weight:800; }
+.ord-meta { font-size:11px; color:var(--text3); margin-top:3px; }
+.ord-items { margin-top:8px; border-top:1px dashed var(--border); padding-top:7px; }
+.ord-it { display:flex; gap:8px; font-size:12px; padding:2px 0; }
+.ord-it .q { color:var(--text3); min-width:34px; }
+.ord-it .d { flex:1; }
+.ord-it .s { color:var(--text3); }
+.ord-src { display:inline-block; font-size:10px; font-weight:700; padding:1px 7px; border-radius:999px;
+           text-transform:uppercase; letter-spacing:.4px; }
+.ord-src.exact { background:var(--gbg); color:var(--green); }
+.ord-src.guess { background:var(--ybg); color:var(--yellow); }
+.ord-src.none  { background:var(--bg2); color:var(--text3); }
+
 /* ── TRANSACTION LIST ────────────────── */
 .txn-toolbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; flex-wrap:wrap; gap:8px; }
 .txn-filters { display:flex; gap:6px; flex-wrap:wrap; }
@@ -459,6 +485,9 @@ details[open] > summary .chev { transform:rotate(90deg); }
     </button>
     <button class="nav-item" onclick="go('kaspi')">
       <span class="icon">💳</span> Касса
+    </button>
+    <button class="nav-item" onclick="go('orders')">
+      <span class="icon">🧾</span> Заказы
     </button>
     <button class="nav-item" onclick="go('analytics')">
       <span class="icon">📈</span> Аналитика
@@ -790,6 +819,40 @@ details[open] > summary .chev { transform:rotate(90deg); }
 
 <!-- АНАЛИТИКА ─────────────────────────── -->
 <!-- KPI ─────────────────────────────────── -->
+<div class="page" id="page-orders">
+  <div class="page-header">
+    <div><div class="page-title">🧾 Заказы</div>
+    <div class="page-sub">клиент · состав · статус — из выгрузок iiko</div></div>
+    <span class="badge by" id="ordBadge">Нет данных</span>
+  </div>
+  <div class="page-body">
+
+    <div class="card">
+      <div class="card-head">
+        <div><div class="card-title">📂 Выгрузки</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px;">
+          кидайте файлы в любом порядке и сколько угодно — тул сам разберёт, что ему дали</div></div>
+      </div>
+      <div class="upload-zone" id="ordZone" style="padding:18px;margin-bottom:0;"
+           onclick="document.getElementById('ordFiles').click()">
+        <div style="font-size:24px;margin-bottom:6px;">📄</div>
+        <div style="font-size:13px;font-weight:700;">Выберите файлы</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:3px;">
+          «Банкеты, резервы, доставки» · 0080 · «Отчёт по блюдам» (можно несколько)</div>
+      </div>
+      <input type="file" id="ordFiles" accept=".xlsx,.xls" multiple style="display:none;">
+      <div id="ordFileList"></div>
+      <div style="margin-top:10px;display:flex;gap:8px;">
+        <button class="btn btn-o btn-sm" onclick="ordReset()">Очистить</button>
+      </div>
+    </div>
+
+    <div id="ordSummary"></div>
+    <div id="ordList"></div>
+
+  </div>
+</div>
+
 <div class="page" id="page-kpi">
   <div class="page-header">
     <div><div class="page-title">🎯 KPI операторов</div>
@@ -4509,6 +4572,296 @@ function updateOpSelect() {
 //  INIT
 // ══════════════════════════════════════════════════
 // Открываем раздел, указанный в адресе: callcenter.html#kaspi
+
+// ══════════════════════════════════════════════════
+//  ЗАКАЗЫ — клиент + состав из трёх выгрузок iiko
+//  «Банкеты, резервы, доставки» — все заказы, включая незакрытые, но без состава.
+//  0080 — состав, но только по закрытым.
+//  «Отчёт по блюдам» — состав по любым, но без номера заказа в строках:
+//  номер есть только в заголовке файла, и то если выгружали по одному заказу.
+//  Отсюда три источника состава, от точного к приблизительному.
+// ══════════════════════════════════════════════════
+let ordBase   = {};   // номер → заказ из «Банкетов»
+let ordItems  = {};   // номер → {items, src}
+let ordFiles  = [];   // что загрузили
+let ordClash  = [];   // времена, на которые пришлось больше одного заказа
+
+const ordKey = (d, t) => d + ' ' + t;
+
+// Время приходит то строкой «9:54», то серийной долей суток из Excel
+function ordTime(v) {
+  if (v == null || v === '') return '';
+  if (typeof v === 'number') {
+    const mins = Math.round((v % 1) * 1440);
+    return String(Math.floor(mins / 60)).padStart(2,'0') + ':' + String(mins % 60).padStart(2,'0');
+  }
+  const m = String(v).match(/(\d{1,2}):(\d{2})/);
+  return m ? String(+m[1]).padStart(2,'0') + ':' + m[2] : '';
+}
+function ordDate(v) {
+  const dt = iikoCellToDT(v);
+  return dt ? dtDate(dt) : '';
+}
+
+// ── «Банкеты, резервы, доставки» ──────────────────
+function parseBanketAoa(aoa) {
+  let hRow = -1, col = {};
+  for (let r = 0; r < Math.min(aoa.length, 20); r++) {
+    const row = aoa[r] || [];
+    if (row.some(v => String(v||'').trim().toLowerCase() === 'номер заказа')) {
+      hRow = r;
+      row.forEach((v,c) => { const k = String(v||'').trim().toLowerCase(); if (k) col[k] = c; });
+      break;
+    }
+  }
+  if (hRow < 0) return null;
+  const C = n => (n in col ? col[n] : -1);
+  const out = [];
+  for (let r = hRow + 1; r < aoa.length; r++) {
+    const row = aoa[r] || [];
+    const num = String(row[C('номер заказа')] == null ? '' : row[C('номер заказа')]).trim();
+    if (!num || !/^\d+$/.test(num)) continue;
+    out.push({
+      num,
+      date:   ordDate(row[C('дата проведения')]),
+      time:   ordTime(row[C('время')]),
+      client: String(row[C('имя гостя')] || '').trim(),
+      phone:  String(row[C('телефон')] || '').trim(),
+      comment:String(row[C('комментарии')] || '').trim(),
+      status: String(row[C('статус')] || '').trim(),
+      sum:    numOrZero(row[C('сумма, тенге')]),
+      paid:   numOrZero(row[C('внесенная сумма, тенге')]),
+      addr:   String(row[C('адрес доставки')] || '').trim()
+    });
+  }
+  return out.length ? out : null;
+}
+
+// ── «Отчёт по блюдам» ─────────────────────────────
+// В строках номера заказа нет — он только в первой ячейке файла.
+// «Отчет по блюдам: Доставка №4850» — один заказ, состав ложится точно.
+// «Отчет по блюдам: Д№4811, Д№4844, …» — несколько, и тогда остаётся
+// только время доставки.
+function parseBlyudaAoa(aoa) {
+  let title = '';
+  for (let r = 0; r < Math.min(aoa.length, 5); r++)
+    for (const v of (aoa[r] || []))
+      if (/отчет по блюдам/i.test(String(v||''))) { title = String(v); break; }
+  if (!title) return null;
+
+  let hRow = -1, col = {};
+  for (let r = 0; r < Math.min(aoa.length, 10); r++) {
+    const row = aoa[r] || [];
+    if (row.some(v => String(v||'').trim().toLowerCase() === 'блюдо')) {
+      hRow = r;
+      row.forEach((v,c) => { const k = String(v||'').trim().toLowerCase(); if (k) col[k] = c; });
+      break;
+    }
+  }
+  if (hRow < 0) return null;
+  const C = n => (n in col ? col[n] : -1);
+  const cDish = C('блюдо'), cQty = C('количество');
+  const cDD = C('дата доставки'), cDT = C('время доставки');
+
+  const nums = (title.match(/№\s*(\d+)/g) || []).map(x => x.replace(/\D/g,''));
+  const single = nums.length === 1 && !/\.\.\./.test(title) ? nums[0] : null;
+
+  const rows = [];
+  for (let r = hRow + 1; r < aoa.length; r++) {
+    const row = aoa[r] || [];
+    const dish = String(row[cDish] == null ? '' : row[cDish]).trim();
+    if (!dish) continue;
+    rows.push({
+      dish, qty: numOrZero(row[cQty]),
+      date: cDD >= 0 ? ordDate(row[cDD]) : '',
+      time: cDT >= 0 ? ordTime(row[cDT]) : ''
+    });
+  }
+  return rows.length ? { title, single, nums, rows } : null;
+}
+
+// ── Разбор любого файла ───────────────────────────
+async function ordAddFile(file) {
+  const wb  = XLSX.read(await file.arrayBuffer(), { type:'array' });
+  const aoa = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],
+                { header:1, raw:true, defval:null, blankrows:true });
+
+  const bank = parseBanketAoa(aoa);
+  if (bank) {
+    bank.forEach(o => { ordBase[o.num] = Object.assign(ordBase[o.num] || {}, o); });
+    return { type:'Банкеты, резервы, доставки', info: bank.length + ' заказов' };
+  }
+
+  const bl = parseBlyudaAoa(aoa);
+  if (bl) {
+    if (bl.single) {
+      ordItems[bl.single] = { items: bl.rows, src:'exact' };
+      return { type:'Отчёт по блюдам', info:'заказ №' + bl.single + ' · ' + bl.rows.length + ' позиций' };
+    }
+    ordItems.__byTime = ordItems.__byTime || {};
+    bl.rows.forEach(r => {
+      const k = ordKey(r.date, r.time);
+      (ordItems.__byTime[k] = ordItems.__byTime[k] || []).push(r);
+    });
+    return { type:'Отчёт по блюдам', info: bl.rows.length + ' позиций · по времени доставки' };
+  }
+
+  // 0080 — пробуем последним: его заголовок узнаётся строже всего
+  try {
+    const orders = parseIikoAoa(aoa);
+    if (orders.length) {
+      orders.forEach(o => {
+        if (!o.num) return;
+        ordBase[o.num] = Object.assign({
+          num:o.num, date:o.uchDate, time: o.planDT ? dtTime(o.planDT).slice(0,5) : '',
+          client:o.client, phone:o.phone || o.phoneD, comment:o.comment,
+          sum:o.sum, addr:o.addr, courier:o.courier, oper:o.oper
+        }, ordBase[o.num] || {});
+        ordItems[o.num] = { items: o.items.map(i => ({ dish:i.dish, qty:i.qty, sum:i.sum })), src:'exact' };
+      });
+      return { type:'0080 — Отчёт по доставкам', info: orders.length + ' заказов с составом' };
+    }
+  } catch (e) {}
+
+  throw new Error('не похоже ни на «Банкеты», ни на 0080, ни на «Отчёт по блюдам»');
+}
+
+// ── Склейка по времени для того, что осталось ─────
+function ordJoinByTime() {
+  ordClash = [];
+  const byTime = ordItems.__byTime;
+  if (!byTime) return;
+  const groups = {};
+  Object.values(ordBase).forEach(o => {
+    if (!o.date || !o.time) return;
+    (groups[ordKey(o.date, o.time)] = groups[ordKey(o.date, o.time)] || []).push(o);
+  });
+  Object.keys(byTime).forEach(k => {
+    const g = groups[k] || [];
+    if (g.length === 1) {
+      const n = g[0].num;
+      if (!ordItems[n] || ordItems[n].src !== 'exact')
+        ordItems[n] = { items: byTime[k], src:'time' };
+    } else if (g.length > 1) {
+      // Разводить нечем: ни цены, ни номера в «Отчёте по блюдам» нет
+      ordClash.push({ key:k, nums: g.map(o => o.num) });
+    }
+  });
+}
+
+// ── Отрисовка ─────────────────────────────────────
+function renderOrders() {
+  ordJoinByTime();
+  const list = Object.values(ordBase).sort((a,b) =>
+    (a.date + a.time).localeCompare(b.date + b.time) || a.num.localeCompare(b.num));
+
+  const fl = document.getElementById('ordFileList');
+  fl.innerHTML = ordFiles.map(f => `<div class="ord-file">
+      <span>${f.ok ? '✅' : '❌'}</span>
+      <span class="nm">${f.name}</span>
+      <span class="tp">${f.ok ? f.type + ' · ' + f.info : f.err}</span>
+    </div>`).join('');
+
+  const badge = document.getElementById('ordBadge');
+  const sum   = document.getElementById('ordSummary');
+  const box   = document.getElementById('ordList');
+  if (!list.length) {
+    badge.className = 'badge by'; badge.textContent = 'Нет данных';
+    sum.innerHTML = ''; box.innerHTML = '';
+    return;
+  }
+
+  let exact = 0, guess = 0, none = 0;
+  list.forEach(o => {
+    const it = ordItems[o.num];
+    if (it && it.src === 'exact') exact++;
+    else if (it) guess++;
+    else none++;
+  });
+
+  badge.className = ordClash.length ? 'badge by' : 'badge bg';
+  badge.textContent = ordClash.length ? 'Есть спорные' : 'Готово';
+
+  sum.innerHTML = `<div class="card">
+    <div class="kpi-row">
+      <div class="kpi"><div class="kpi-label">Заказов</div><div class="kpi-val">${list.length}</div></div>
+      <div class="kpi g"><div class="kpi-label">Состав точно</div><div class="kpi-val">${exact}</div>
+        <div class="kpi-sub">0080 или файл по одному заказу</div></div>
+      <div class="kpi y"><div class="kpi-label">Состав по времени</div><div class="kpi-val">${guess}</div>
+        <div class="kpi-sub">склейка, не доказано</div></div>
+      <div class="kpi"><div class="kpi-label">Без состава</div><div class="kpi-val">${none}</div></div>
+    </div>
+    ${ordClash.length ? `<div class="status-box s-warn" style="margin-top:12px;">
+      <div class="s-icon">⚠️</div><div>
+        <div class="s-title">На одно время пришлось несколько заказов</div>
+        <div class="s-sub">${ordClash.map(c => c.key + ' — №' + c.nums.join(', №')).join(' · ')}.
+        Развести нечем: в «Отчёте по блюдам» нет ни номера, ни цены.
+        Выгрузите эти заказы по одному — номер возьмётся из заголовка файла.</div>
+      </div></div>` : ''}
+  </div>`;
+
+  box.innerHTML = list.map(o => {
+    const it   = ordItems[o.num];
+    const src  = !it ? 'none' : it.src === 'exact' ? 'exact' : 'guess';
+    const sLbl = !it ? 'состава нет' : it.src === 'exact' ? 'точно' : 'по времени';
+    const open = o.status && !/закрыт/i.test(o.status);
+    const clash = ordClash.some(c => c.nums.includes(o.num));
+    return `<div class="ord-card ${clash ? 'warn' : ''} ${open ? 'open' : ''}">
+      <div class="ord-top">
+        <span class="ord-num">№${o.num}</span>
+        <span class="ord-cl">${o.client || '—'}</span>
+        <span class="ord-ph">${o.phone || ''}</span>
+        <span class="ord-sum">${kFmt(o.sum || 0)}</span>
+      </div>
+      <div class="ord-meta">
+        ${ruDate(o.date)} ${o.time || ''}
+        ${o.status ? ' · ' + o.status : ''}
+        ${o.paid ? ' · внесено ' + kFmt(o.paid) : ''}
+        ${o.addr ? ' · ' + o.addr : ''}
+        ${o.comment ? ' · «' + o.comment + '»' : ''}
+        <span class="ord-src ${src}" style="margin-left:6px;">${sLbl}</span>
+      </div>
+      ${it ? `<div class="ord-items">${it.items.map(i => `<div class="ord-it">
+          <span class="q">${i.qty ? i.qty + ' ×' : ''}</span>
+          <span class="d">${i.dish}</span>
+          <span class="s">${i.sum ? kFmt(i.sum) : ''}</span>
+        </div>`).join('')}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function ordReset() {
+  ordBase = {}; ordItems = {}; ordFiles = []; ordClash = [];
+  const z = document.getElementById('ordZone');
+  z.className = 'upload-zone';
+  renderOrders();
+}
+
+function initOrdersUpload() {
+  const inp = document.getElementById('ordFiles');
+  if (!inp) return;
+  inp.addEventListener('change', async e => {
+    const files = [...e.target.files];
+    if (!files.length) return;
+    const z = document.getElementById('ordZone');
+    z.innerHTML = '<div style="font-size:22px;">⏳</div><div style="font-size:12px;">Читаем…</div>';
+    for (const f of files) {
+      try {
+        const r = await ordAddFile(f);
+        ordFiles.push({ name:f.name, ok:true, type:r.type, info:r.info });
+      } catch (err) {
+        ordFiles.push({ name:f.name, ok:false, err: err.message });
+      }
+    }
+    z.className = 'upload-zone done';
+    z.innerHTML = `<div style="font-size:22px;">📄</div>
+      <div style="font-size:13px;font-weight:700;">Файлов загружено: ${ordFiles.length}</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:3px;">нажмите, чтобы добавить ещё</div>`;
+    inp.value = '';
+    renderOrders();
+  });
+}
+
 function goFromHash() {
   const id = (location.hash || '').replace('#', '');
   if (id && document.getElementById('page-' + id)) go(id);
@@ -4521,6 +4874,7 @@ document.addEventListener('DOMContentLoaded', () => {
   goFromHash();
   initPrihodUpload();
   initAnalyticsUpload();
+  initOrdersUpload();
   initWoltInvoice();
   loadBranchAddr();
   loadWoltLink();
