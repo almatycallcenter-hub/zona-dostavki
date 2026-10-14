@@ -193,6 +193,18 @@ body{font-family:var(--sans);letter-spacing:-.01em;background:var(--bg);color:va
 .ord-src.exact { background:var(--gbg); color:var(--green); }
 .ord-src.guess { background:var(--ybg); color:var(--yellow); }
 .ord-src.none  { background:var(--bg2); color:var(--text3); }
+.cat-chip { display:inline-flex; align-items:center; gap:6px; padding:5px 12px; border-radius:999px;
+            border:1px solid var(--border); background:var(--bg2); font-size:12px; cursor:pointer;
+            user-select:none; transition:background .15s,border-color .15s; }
+.cat-chip:hover { border-color:var(--text3); }
+.cat-chip.on { background:var(--text); color:#fff; border-color:var(--text); }
+.cat-chip .n { font-size:11px; opacity:.6; }
+.cl-table { width:100%; border-collapse:collapse; font-size:12px; margin-top:10px; }
+.cl-table th { text-align:left; font-size:10px; text-transform:uppercase; letter-spacing:.6px;
+               color:var(--text3); font-weight:600; padding:6px 8px; border-bottom:1px solid var(--border); }
+.cl-table td { padding:6px 8px; border-bottom:1px solid var(--border); }
+.cl-table tr.rep td { background:var(--ybg); }
+.cl-ph { font-family:var(--mono); }
 
 /* ── TRANSACTION LIST ────────────────── */
 .txn-toolbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; flex-wrap:wrap; gap:8px; }
@@ -853,6 +865,26 @@ details[open] > summary .chev { transform:rotate(90deg); }
       <div style="margin-top:10px;display:flex;gap:8px;">
         <button class="btn btn-o btn-sm" onclick="ordReset()">Очистить</button>
       </div>
+    </div>
+
+    <div class="card" id="clCard" style="display:none;">
+      <div class="card-head">
+        <div><div class="card-title">👥 Клиенты по категориям</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px;">
+          кто что заказывал — для рассылки и повторных предложений</div></div>
+        <span class="badge by" id="clBadge">—</span>
+      </div>
+      <div id="clChips" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap;">
+        <input class="fi" id="clDish" placeholder="…или часть названия блюда: торт, бәліш, сет"
+               style="flex:1;min-width:220px;" oninput="renderClients()">
+        <label style="font-size:12px;display:flex;align-items:center;gap:6px;">
+          <input type="checkbox" id="clRepeat" onchange="renderClients()"> только повторные
+        </label>
+        <button class="btn btn-o btn-sm" onclick="clCopyPhones()">Скопировать телефоны</button>
+        <button class="btn btn-p btn-sm" onclick="clDownload()">Скачать CSV</button>
+      </div>
+      <div id="clOut"></div>
     </div>
 
     <div id="ordSummary"></div>
@@ -4736,7 +4768,7 @@ async function ordAddFile(file) {
           client:o.client, phone:o.phone || o.phoneD, comment:o.comment,
           sum:o.sum, addr:o.addr, courier:o.courier, oper:o.oper
         }, ordBase[o.num] || {});
-        ordItems[o.num] = { items: o.items.map(i => ({ dish:i.dish, qty:i.qty, sum:i.sum })), src:'exact' };
+        ordItems[o.num] = { items: o.items.map(i => ({ dish:i.dish, qty:i.qty, sum:i.sum, cat:i.cat, type:i.type })), src:'exact' };
       });
       return { type:'0080 — Отчёт по доставкам', info: orders.length + ' заказов с составом' };
     }
@@ -4822,6 +4854,7 @@ function renderOrders() {
   if (!list.length) {
     badge.className = 'badge by'; badge.textContent = 'Нет данных';
     sum.innerHTML = ''; box.innerHTML = '';
+    renderClients();
     return;
   }
 
@@ -4858,6 +4891,8 @@ function renderOrders() {
       </div></div>` : ''}
   </div>`;
 
+  renderClients();
+
   box.innerHTML = list.map(o => {
     const it   = ordItems[o.num];
     const src  = !it ? 'none' : it.src === 'exact' ? 'exact' : 'guess';
@@ -4890,8 +4925,134 @@ function renderOrders() {
   }).join('');
 }
 
+
+// ══════════════════════════════════════════════════
+//  КЛИЕНТЫ ПО КАТЕГОРИЯМ
+//  Состав есть только у заказов из 0080 — там же лежит «Категория блюда».
+//  Склейка по времени категорию не знает, поэтому такие заказы в выборку
+//  не попадают: лучше недобрать клиента, чем позвать его за чужим тортом.
+// ══════════════════════════════════════════════════
+let clPicked = new Set();
+// Это не еда: услуги, упаковка и оформление в категориях не нужны
+const CL_SKIP = /^(доставка|оформление|услуг)/i;
+
+function clPhone(o) {
+  const d = String(o.phone || o.phoneD || '').replace(/\D/g, '');
+  return d.length >= 10 ? '+7' + d.slice(-10) : '';
+}
+
+function clCats() {
+  const c = {};
+  Object.values(ordBase).forEach(o => {
+    const it = ordItems[o.num];
+    if (!it || it.src !== 'exact') return;
+    it.items.forEach(i => {
+      const k = (i.cat || '').trim();
+      if (!k || CL_SKIP.test(k) || i.type === 'Услуга') return;
+      c[k] = (c[k] || 0) + 1;
+    });
+  });
+  return c;
+}
+
+// Возвращает клиентов, у которых хоть одна позиция подошла под фильтр
+function clBuild() {
+  const q = (document.getElementById('clDish').value || '').trim().toLowerCase();
+  const out = {};
+  Object.values(ordBase).forEach(o => {
+    const it = ordItems[o.num];
+    if (!it || it.src !== 'exact') return;
+    const hit = it.items.filter(i => {
+      const k = (i.cat || '').trim();
+      if (!k || CL_SKIP.test(k) || i.type === 'Услуга') return false;
+      if (clPicked.size && !clPicked.has(k)) return false;
+      if (q && !String(i.dish || '').toLowerCase().includes(q)) return false;
+      return true;
+    });
+    if (!hit.length) return;
+    const ph = clPhone(o);
+    const key = ph || ('№' + o.num);
+    const c = out[key] = out[key] || { phone: ph, names: [], n: 0, dishes: {}, first: '', last: '', sum: 0 };
+    if (o.client && !c.names.includes(o.client)) c.names.push(o.client);
+    c.n++;
+    c.sum += hit.reduce((s, i) => s + (i.sum || 0), 0);
+    hit.forEach(i => { c.dishes[i.dish] = (c.dishes[i.dish] || 0) + (i.qty || 1); });
+    const d = o.date || '';
+    if (d > c.last) c.last = d;
+    if (!c.first || d < c.first) c.first = d;
+  });
+  let list = Object.values(out);
+  if (document.getElementById('clRepeat').checked) list = list.filter(c => c.n > 1);
+  return list.sort((a, b) => b.n - a.n || (b.last || '').localeCompare(a.last || ''));
+}
+
+function renderClients() {
+  const card = document.getElementById('clCard');
+  const cats = clCats();
+  const names = Object.keys(cats).sort((a, b) => cats[b] - cats[a]);
+  if (!names.length) { card.style.display = 'none'; return; }
+  card.style.display = '';
+
+  document.getElementById('clChips').innerHTML = names.map(n =>
+    `<div class="cat-chip ${clPicked.has(n) ? 'on' : ''}" onclick="clToggle('${n.replace(/'/g, "\\'")}')">
+       ${n}<span class="n">${cats[n]}</span></div>`).join('');
+
+  const list = clBuild();
+  document.getElementById('clBadge').className = 'badge ' + (list.length ? 'bg' : 'by');
+  document.getElementById('clBadge').textContent = list.length ? list.length + ' клиентов' : 'никто не подошёл';
+
+  const noPhone = list.filter(c => !c.phone).length;
+  document.getElementById('clOut').innerHTML = !list.length ? '' :
+    `<div style="font-size:11px;color:var(--text3);margin-top:10px;">
+       Заказов: ${list.reduce((s, c) => s + c.n, 0)} ·
+       повторных клиентов: ${list.filter(c => c.n > 1).length}
+       ${noPhone ? ' · без телефона: ' + noPhone : ''}</div>
+     <div style="max-height:420px;overflow:auto;">
+     <table class="cl-table"><thead><tr>
+       <th>Телефон</th><th>Имя</th><th>Зак.</th><th>Что брали</th><th>Последний</th><th style="text-align:right;">Сумма</th>
+     </tr></thead><tbody>${list.map(c => `<tr class="${c.n > 1 ? 'rep' : ''}">
+       <td class="cl-ph">${c.phone || '—'}</td>
+       <td>${c.names.join(', ') || '—'}</td>
+       <td>${c.n}</td>
+       <td>${Object.entries(c.dishes).map(([d, q]) => (q > 1 ? q + ' × ' : '') + d).join(', ')}</td>
+       <td>${ruDate(c.last)}</td>
+       <td style="text-align:right;">${kFmt(Math.round(c.sum))}</td>
+     </tr>`).join('')}</tbody></table></div>`;
+}
+
+function clToggle(n) {
+  if (clPicked.has(n)) clPicked.delete(n); else clPicked.add(n);
+  renderClients();
+}
+
+function clCopyPhones() {
+  const ph = clBuild().map(c => c.phone).filter(Boolean);
+  navigator.clipboard.writeText(ph.join('\n'))
+    .then(() => alert('Скопировано телефонов: ' + ph.length))
+    .catch(() => alert('Не вышло скопировать — скачайте CSV'));
+}
+
+function clDownload() {
+  const list = clBuild();
+  if (!list.length) return;
+  const esc = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+  const rows = [['Телефон', 'Имя', 'Заказов', 'Что брали', 'Первый', 'Последний', 'Сумма, тенге']];
+  list.forEach(c => rows.push([c.phone, c.names.join(', '), c.n,
+    Object.entries(c.dishes).map(([d, q]) => (q > 1 ? q + ' x ' : '') + d).join('; '),
+    c.first, c.last, Math.round(c.sum)]));
+  // BOM — иначе Excel откроет кириллицу кракозябрами
+  const blob = new Blob(['﻿' + rows.map(r => r.map(esc).join(';')).join('\r\n')],
+                        { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  const tag = clPicked.size ? [...clPicked].join('-') : 'все';
+  a.download = `Клиенты — ${tag}.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
 function ordReset() {
-  ordBase = {}; ordItems = {}; ordFiles = []; ordClash = [];
+  ordBase = {}; ordItems = {}; ordFiles = []; ordClash = []; clPicked = new Set();
   const z = document.getElementById('ordZone');
   z.className = 'upload-zone';
   renderOrders();

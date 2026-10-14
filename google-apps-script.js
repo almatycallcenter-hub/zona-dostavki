@@ -77,6 +77,13 @@ function doPost(e) {
 //  Снимок экрана незакрытых заказов → Google Drive
 //  Кладём рядом с таблицей, ссылку пишем в строку смены.
 // ════════════════════════════════════════════════════════════
+// Снимки кладём в Drive, а раньше скрипт туда не ходил — значит нужен
+// новый доступ. Запустите эту функцию один раз и разрешите доступ к Диску.
+function authorizeDrive() {
+  const n = DriveApp.getRootFolder().getName();
+  SpreadsheetApp.getUi().alert('Доступ к Диску есть. Корневая папка: ' + n);
+}
+
 function saveShot(data) {
   const b64 = String(data.image || '').replace(/^data:image\/\w+;base64,/, '');
   if (!b64) throw new Error('Пустой снимок');
