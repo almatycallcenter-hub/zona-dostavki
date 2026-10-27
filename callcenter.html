@@ -205,6 +205,18 @@ body{font-family:var(--sans);letter-spacing:-.01em;background:var(--bg);color:va
 .cl-table td { padding:6px 8px; border-bottom:1px solid var(--border); }
 .cl-table tr.rep td { background:var(--ybg); }
 .cl-ph { font-family:var(--mono); }
+.sk-day { border:1px solid var(--border); border-radius:10px; padding:10px 12px; margin-top:8px; background:var(--bg3); }
+.sk-day.bad { border-color:var(--red); background:var(--rbg); }
+.sk-day.warn { border-color:var(--yellow); background:var(--ybg); }
+.sk-head { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; font-size:13px; }
+.sk-date { font-weight:800; }
+.sk-sum { margin-left:auto; font-family:var(--mono); font-weight:700; }
+.sk-pos { font-size:12px; margin-top:7px; padding-top:7px; border-top:1px dashed var(--border); }
+.sk-pos b { font-weight:700; }
+.sk-ord { font-size:11px; color:var(--text2); margin-left:14px; }
+.sk-br { display:inline-block; font-size:10px; font-weight:700; padding:1px 6px; border-radius:999px;
+         background:var(--bbg); color:var(--blue); margin-left:4px; }
+.sk-no { color:var(--red); font-size:11px; margin-left:14px; }
 
 /* ── TRANSACTION LIST ────────────────── */
 .txn-toolbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; flex-wrap:wrap; gap:8px; }
@@ -858,13 +870,23 @@ details[open] > summary .chev { transform:rotate(90deg); }
         <div style="font-size:24px;margin-bottom:6px;">📄</div>
         <div style="font-size:13px;font-weight:700;">Выберите файлы</div>
         <div style="font-size:11px;color:var(--text3);margin-top:3px;">
-          «Банкеты, резервы, доставки» · 0080 · «Отчёт по блюдам» (можно несколько)</div>
+          «Банкеты, резервы, доставки» · 0080 · «Отчёт по блюдам» · «Сличительная ведомость»</div>
       </div>
       <input type="file" id="ordFiles" accept=".xlsx,.xls" multiple style="display:none;">
       <div id="ordFileList"></div>
       <div style="margin-top:10px;display:flex;gap:8px;">
         <button class="btn btn-o btn-sm" onclick="ordReset()">Очистить</button>
       </div>
+    </div>
+
+    <div class="card" id="skCard" style="display:none;">
+      <div class="card-head">
+        <div><div class="card-title">📦 Сверка склада «Доставка»</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px;">
+          отрицательный остаток = продали, а приходной накладной нет</div></div>
+        <span class="badge by" id="skBadge">—</span>
+      </div>
+      <div id="skOut"></div>
     </div>
 
     <div class="card" id="clCard" style="display:none;">
@@ -4743,6 +4765,13 @@ async function ordAddFile(file) {
     return { type:'Банкеты, резервы, доставки', info: bank.length + ' заказов' };
   }
 
+  const sl = parseSlichitAoa(aoa);
+  if (sl) {
+    sl.forEach(d => { skDays = skDays.filter(x => x.date !== d.date); skDays.push(d); });
+    const pr = sl.reduce((s, d) => s + d.items.filter(i => i.is).length, 0);
+    return { type:'Сличительная ведомость', info: sl.length + ' дней · позиций без прихода: ' + pr };
+  }
+
   const bl = parseBlyudaAoa(aoa);
   if (bl) {
     if (bl.single) {
@@ -4855,6 +4884,7 @@ function renderOrders() {
     badge.className = 'badge by'; badge.textContent = 'Нет данных';
     sum.innerHTML = ''; box.innerHTML = '';
     renderClients();
+    renderSklad();
     return;
   }
 
@@ -4892,6 +4922,7 @@ function renderOrders() {
   </div>`;
 
   renderClients();
+  renderSklad();
 
   box.innerHTML = list.map(o => {
     const it   = ordItems[o.num];
@@ -5020,6 +5051,173 @@ function renderClients() {
      </tr>`).join('')}</tbody></table></div>`;
 }
 
+
+// ══════════════════════════════════════════════════
+//  СЛИЧИТЕЛЬНАЯ ВЕДОМОСТЬ → кто не провёл накладную
+//  Склад «Доставка» транзитный: фактический остаток всегда ноль.
+//  Поэтому расхождение читается однозначно —
+//  расчётный ушёл в минус: продали, а прихода нет (в ведомости «излишек»);
+//  расчётный остался плюсовым: приход есть, а продажи не было («недостача»).
+// ══════════════════════════════════════════════════
+let skDays = [];
+
+const skNorm = s => String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
+const skKey  = s => skNorm(s).toLowerCase().replace(/ё/g, 'е');
+function skNum(v) {
+  if (v == null || v === '') return 0;
+  if (typeof v === 'number') return v;
+  const n = parseFloat(String(v).replace(/[\s ]/g, '').replace(',', '.'));
+  return isNaN(n) ? 0 : n;
+}
+// «т1 опл», «опл тт4 6927», «тт9» — филиал оператор пишет в комментарии
+function skBranch(c) {
+  const m = String(c || '').toLowerCase().match(/\bт{1,2}\s*(\d{1,2})\b/);
+  return m ? 'ТТ' + m[1] : '';
+}
+
+function parseSlichitAoa(aoa) {
+  const at = (r, c) => (aoa[r] && aoa[r][c] != null ? aoa[r][c] : '');
+  const starts = [];
+  for (let r = 0; r < aoa.length; r++)
+    if ((aoa[r] || []).some(v => /сличительная ведомость/i.test(String(v || '')))) starts.push(r);
+  if (!starts.length) return null;
+  starts.push(aoa.length);
+
+  const out = [];
+  for (let b = 0; b < starts.length - 1; b++) {
+    const from = starts[b], to = starts[b + 1];
+    let date = '';
+    for (let r = from; r < Math.min(from + 8, to) && !date; r++)
+      for (const v of (aoa[r] || [])) {
+        const m = String(v || '').trim().match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+        if (m) { date = `${m[3]}-${m[2]}-${m[1]}`; break; }
+      }
+    // Колонки ищем по шапке, а не по номерам: в выгрузке они плавают
+    let h = -1;
+    for (let r = from; r < to; r++)
+      if ((aoa[r] || []).some(v => skKey(v) === 'наименование')) { h = r; break; }
+    if (h < 0) continue;
+    const find = (row, txt) => (aoa[row] || []).findIndex(v => skKey(v) === txt);
+    const cName = find(h, 'наименование'), cCode = find(h, 'код');
+    const cUnit = find(h, 'ед. изм.'), cPrice = find(h, 'цена');
+    const cCalc = (aoa[h] || []).findIndex(v => /остатки расчетные/i.test(String(v || '')));
+    const cIzl  = find(h + 1, 'излишки'), cNed = find(h + 1, 'недостача');
+    // «Кол-во» и «Сумма» стоят правее своего заголовка
+    const after = (row, txt, col) => {
+      const r = aoa[row] || [];
+      for (let i = col; i < r.length; i++) if (skKey(r[i]) === txt) return i;
+      return -1;
+    };
+    const cCq = after(h + 1, 'кол-во', cCalc), cCs = after(h + 1, 'сумма, тенге', cCalc);
+    const cIq = after(h + 2, 'кол-во', cIzl), cIs = after(h + 2, 'сумма, тенге', cIzl);
+    const cNq = after(h + 2, 'кол-во', cNed), cNs = after(h + 2, 'сумма, тенге', cNed);
+
+    const items = [];
+    for (let r = h + 1; r < to; r++) {
+      if (skKey(at(r, 0)) === 'итого') break;
+      const name = skNorm(at(r, cName)), code = skNorm(at(r, cCode));
+      if (!name || !code) continue;
+      const it = { name, code, unit: skNorm(at(r, cUnit)), price: skNum(at(r, cPrice)),
+                   cq: skNum(at(r, cCq)), cs: skNum(at(r, cCs)),
+                   iq: skNum(at(r, cIq)), is: skNum(at(r, cIs)),
+                   nq: skNum(at(r, cNq)), ns: skNum(at(r, cNs)) };
+      if (it.is || it.ns) items.push(it);
+    }
+    if (date) out.push({ date, items });
+  }
+  return out.length ? out : null;
+}
+
+// Ищем в 0080 заказы этого дня, где позиция уходила
+function skOrders(date, name) {
+  const k = skKey(name), res = [];
+  Object.values(ordBase).forEach(o => {
+    if (o.date !== date) return;
+    const it = ordItems[o.num];
+    if (!it || it.src !== 'exact') return;
+    const hit = it.items.filter(i => skKey(i.dish) === k);
+    if (!hit.length) return;
+    res.push({ num: o.num, oper: o.oper || '', comment: o.comment || '',
+               branch: skBranch(o.comment), qty: hit.reduce((s, i) => s + (i.qty || 0), 0) });
+  });
+  return res;
+}
+
+function renderSklad() {
+  const card = document.getElementById('skCard');
+  if (!skDays.length) { card.style.display = 'none'; return; }
+  card.style.display = '';
+
+  const sorted = [...skDays].sort((a, b) => b.date.localeCompare(a.date));
+  let tIs = 0, tNs = 0;
+  sorted.forEach(d => d.items.forEach(i => { tIs += i.is; tNs += i.ns; }));
+  const has0080 = Object.values(ordItems).some(x => x && x.src === 'exact');
+
+  const badge = document.getElementById('skBadge');
+  const bad = sorted.filter(d => d.items.some(i => i.is));
+  badge.className = 'badge ' + (bad.length ? 'br' : 'bg');
+  badge.textContent = bad.length ? 'Дней с минусом: ' + bad.length : 'Чисто';
+
+  const byBranch = {};
+  let linked = 0, unlinked = 0;
+
+  const body = sorted.map(d => {
+    const minus = d.items.filter(i => i.is);
+    const plus  = d.items.filter(i => i.ns);
+    const sIs = minus.reduce((s, i) => s + i.is, 0);
+    const sNs = plus.reduce((s, i) => s + i.ns, 0);
+    const cls = minus.length >= 5 ? 'bad' : (minus.length || plus.length) ? 'warn' : '';
+    const rows = d.items.map(i => {
+      const neg = !!i.is;
+      const qty = neg ? i.iq : i.nq, sum = neg ? i.is : i.ns;
+      const ords = has0080 ? skOrders(d.date, i.name) : null;
+      if (ords) { if (ords.length) linked++; else unlinked++; }
+      if (ords) ords.forEach(o => {
+        const b = o.branch || '—';
+        byBranch[b] = (byBranch[b] || 0) + (neg ? i.price * o.qty : 0);
+      });
+      return `<div class="sk-pos">
+        <b style="color:${neg ? 'var(--red)' : 'var(--yellow)'}">${neg ? 'нет прихода' : 'не продано'}</b> ·
+        ${i.name} · ${qty} ${i.unit} × ${kFmt(i.price)} = <b>${kFmt(sum)}</b>
+        ${!ords ? '' : ords.length
+          ? ords.map(o => `<div class="sk-ord">заказ №${o.num} · ${o.qty} ${i.unit} · ${o.oper || 'оператор не указан'}
+              ${o.branch ? `<span class="sk-br">${o.branch}</span>` : ''}
+              ${o.comment ? ' · «' + o.comment + '»' : ''}</div>`).join('')
+          : '<div class="sk-no">в заказах этого дня не нашлось — товар ушёл не через доставку</div>'}
+      </div>`;
+    }).join('');
+    return `<div class="sk-day ${cls}">
+      <div class="sk-head">
+        <span class="sk-date">${ruDate(d.date)}</span>
+        <span style="color:var(--text3);font-size:11px;">
+          ${minus.length ? minus.length + ' без прихода' : ''}${minus.length && plus.length ? ' · ' : ''}${plus.length ? plus.length + ' не продано' : ''}</span>
+        <span class="sk-sum">${sIs ? '<span style="color:var(--red)">' + kFmt(sIs) + '</span>' : ''}${sIs && sNs ? ' · ' : ''}${sNs ? '<span style="color:var(--yellow)">' + kFmt(sNs) + '</span>' : ''}</span>
+      </div>${rows}</div>`;
+  }).join('');
+
+  const brList = Object.entries(byBranch).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+  document.getElementById('skOut').innerHTML = `
+    <div class="kpi-row" style="margin-bottom:12px;">
+      <div class="kpi"><div class="kpi-label">Дней в файле</div><div class="kpi-val">${skDays.length}</div></div>
+      <div class="kpi r"><div class="kpi-label">Продали без прихода</div><div class="kpi-val">${kFmt(tIs)}</div>
+        <div class="kpi-sub">накладная не проведена</div></div>
+      <div class="kpi y"><div class="kpi-label">Пришло, но не продано</div><div class="kpi-val">${kFmt(tNs)}</div></div>
+      <div class="kpi"><div class="kpi-label">Дней с минусом</div><div class="kpi-val">${bad.length}</div></div>
+    </div>
+    ${!has0080 ? `<div class="status-box s-warn"><div class="s-icon">ℹ️</div><div>
+        <div class="s-title">Загрузите 0080 за этот же период</div>
+        <div class="s-sub">тогда рядом с каждой позицией встанут заказы, через которые она ушла, и филиал из комментария</div>
+      </div>` : brList.length ? `<div class="card" style="background:var(--bg3);margin-bottom:12px;">
+        <div class="card-title" style="margin-bottom:8px;">Куда смотреть — по филиалам</div>
+        ${brList.map(([b, v]) => `<div style="display:flex;font-size:12px;padding:3px 0;">
+          <span class="sk-br" style="margin:0">${b}</span>
+          <span style="margin-left:auto;font-family:var(--mono);font-weight:700;">${kFmt(v)}</span></div>`).join('')}
+        <div style="font-size:11px;color:var(--text3);margin-top:8px;">
+          филиал берётся из комментария к заказу · сопоставлено позиций: ${linked}${unlinked ? ', не нашлось: ' + unlinked : ''}</div>
+      </div>` : ''}
+    ${body}`;
+}
+
 function clToggle(n) {
   if (clPicked.has(n)) clPicked.delete(n); else clPicked.add(n);
   renderClients();
@@ -5052,7 +5250,7 @@ function clDownload() {
 }
 
 function ordReset() {
-  ordBase = {}; ordItems = {}; ordFiles = []; ordClash = []; clPicked = new Set();
+  ordBase = {}; ordItems = {}; ordFiles = []; ordClash = []; clPicked = new Set(); skDays = [];
   const z = document.getElementById('ordZone');
   z.className = 'upload-zone';
   renderOrders();
