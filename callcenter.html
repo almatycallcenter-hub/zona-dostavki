@@ -5071,7 +5071,9 @@ function skNum(v) {
 }
 // «т1 опл», «опл тт4 6927», «тт9» — филиал оператор пишет в комментарии
 function skBranch(c) {
-  const m = String(c || '').toLowerCase().match(/\bт{1,2}\s*(\d{1,2})\b/);
+  // \b в JS считает границей только латиницу и цифры, поэтому для «опл тт4»
+  // он не срабатывает — проверяем символ слева руками
+  const m = String(c || '').toLowerCase().match(/(?:^|[^а-яёa-z0-9])т{1,2}\s*(\d{1,2})/);
   return m ? 'ТТ' + m[1] : '';
 }
 
@@ -5143,6 +5145,17 @@ function skOrders(date, name) {
   return res;
 }
 
+// Дни, за которые загружен 0080. Для остальных мы просто ничего не знаем
+// и не вправе говорить «в заказах не нашлось».
+function skCovered() {
+  const d = new Set();
+  Object.values(ordBase).forEach(o => {
+    const it = ordItems[o.num];
+    if (it && it.src === 'exact' && o.date) d.add(o.date);
+  });
+  return d;
+}
+
 function renderSklad() {
   const card = document.getElementById('skCard');
   if (!skDays.length) { card.style.display = 'none'; return; }
@@ -5151,7 +5164,8 @@ function renderSklad() {
   const sorted = [...skDays].sort((a, b) => b.date.localeCompare(a.date));
   let tIs = 0, tNs = 0;
   sorted.forEach(d => d.items.forEach(i => { tIs += i.is; tNs += i.ns; }));
-  const has0080 = Object.values(ordItems).some(x => x && x.src === 'exact');
+  const covered = skCovered();
+  const has0080 = covered.size > 0;
 
   const badge = document.getElementById('skBadge');
   const bad = sorted.filter(d => d.items.some(i => i.is));
@@ -5170,12 +5184,17 @@ function renderSklad() {
     const rows = d.items.map(i => {
       const neg = !!i.is;
       const qty = neg ? i.iq : i.nq, sum = neg ? i.is : i.ns;
-      const ords = has0080 ? skOrders(d.date, i.name) : null;
+      const ords = covered.has(d.date) ? skOrders(d.date, i.name) : null;
       if (ords) { if (ords.length) linked++; else unlinked++; }
-      if (ords) ords.forEach(o => {
-        const b = o.branch || '—';
-        byBranch[b] = (byBranch[b] || 0) + (neg ? i.price * o.qty : 0);
-      });
+      // Расхождение делим между заказами пропорционально тому, сколько через
+      // каждый ушло: иначе на филиал ляжет вся проданная сумма, а не недостающая
+      if (ords && neg) {
+        const all = ords.reduce((s, o) => s + o.qty, 0);
+        if (all > 0) ords.forEach(o => {
+          const b = o.branch || 'филиал не указан';
+          byBranch[b] = (byBranch[b] || 0) + i.price * i.iq * (o.qty / all);
+        });
+      }
       return `<div class="sk-pos">
         <b style="color:${neg ? 'var(--red)' : 'var(--yellow)'}">${neg ? 'нет прихода' : 'не продано'}</b> ·
         ${i.name} · ${qty} ${i.unit} × ${kFmt(i.price)} = <b>${kFmt(sum)}</b>
@@ -5184,6 +5203,7 @@ function renderSklad() {
               ${o.branch ? `<span class="sk-br">${o.branch}</span>` : ''}
               ${o.comment ? ' · «' + o.comment + '»' : ''}</div>`).join('')
           : '<div class="sk-no">в заказах этого дня не нашлось — товар ушёл не через доставку</div>'}
+        ${ords ? '' : '<div class="sk-ord">0080 за этот день не загружен — заказы не проверены</div>'}
       </div>`;
     }).join('');
     return `<div class="sk-day ${cls}">
@@ -5213,7 +5233,8 @@ function renderSklad() {
           <span class="sk-br" style="margin:0">${b}</span>
           <span style="margin-left:auto;font-family:var(--mono);font-weight:700;">${kFmt(v)}</span></div>`).join('')}
         <div style="font-size:11px;color:var(--text3);margin-top:8px;">
-          филиал берётся из комментария к заказу · сопоставлено позиций: ${linked}${unlinked ? ', не нашлось: ' + unlinked : ''}</div>
+          филиал берётся из комментария к заказу · сумма разнесена по заказам пропорционально ·
+          проверено позиций: ${linked + unlinked} из ${sorted.reduce((s, d) => s + d.items.length, 0)}${unlinked ? ' · не нашлось в заказах: ' + unlinked : ''}</div>
       </div>` : ''}
     ${body}`;
 }
