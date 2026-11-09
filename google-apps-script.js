@@ -1218,6 +1218,119 @@ function getReceipts(from, to) {
   return { status: 'ok', data: out };
 }
 
+// ══════════════════════════════════════════════════════════
+//  РАЗОВЫЙ ПЕРЕНОС: «Яндекс отчет» → лист «Чеки курьерам»
+//  В исходнике нет номеров заказов — есть филиал, день, адрес,
+//  служба и суммы. Переносим как есть, номер остаётся пустым.
+//  Повторный запуск ничего не задваивает: строки сверяются
+//  по дате, адресу и сумме курьеру.
+// ══════════════════════════════════════════════════════════
+const YANDEX_REPORT_ID = 'ВСТАВЬТЕ_ID_ОТЧЁТА_ЯНДЕКС';
+const YANDEX_SHEET = 'Лист2';
+
+const RU_MONTHS = [['январ', 1], ['феврал', 2], ['март', 3], ['апрел', 4], ['ма', 5], ['июн', 6],
+                   ['июл', 7], ['август', 8], ['сентябр', 9], ['октябр', 10], ['ноябр', 11], ['декабр', 12]];
+
+// Строка-заголовок месяца: «июль 2026», «Октябрь 2026»
+function ymMonth_(s) {
+  const t = String(s || '').trim().toLowerCase();
+  const y = t.match(/(20\d{2})/);
+  if (!y) return null;
+  for (let i = 0; i < RU_MONTHS.length; i++) {
+    if (t.indexOf(RU_MONTHS[i][0]) === 0) return { m: RU_MONTHS[i][1], y: Number(y[1]) };
+  }
+  return null;
+}
+
+function ymNum_(v) {
+  const n = Number(String(v == null ? '' : v).replace(/[^\d.,-]/g, '').replace(/\s/g, '').replace(',', '.'));
+  return isNaN(n) ? 0 : n;
+}
+
+// Вставляет колонку сразу после колонки с заданным названием
+function ensureColumnAfterName(sheet, title, afterTitle) {
+  const head = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
+  if (head.indexOf(title) !== -1) return;
+  const at = head.indexOf(afterTitle);
+  ensureColumn(sheet, title, at >= 0 ? at + 1 : sheet.getLastColumn());
+}
+
+function importYandexReport() {
+  if (!YANDEX_REPORT_ID || YANDEX_REPORT_ID.indexOf('ВСТАВЬТЕ') === 0)
+    return tell_('Не указан YANDEX_REPORT_ID — впишите id таблицы «Яндекс отчет».');
+
+  const src = SpreadsheetApp.openById(YANDEX_REPORT_ID).getSheetByName(YANDEX_SHEET);
+  if (!src) return tell_('В таблице нет листа «' + YANDEX_SHEET + '».');
+  const rows = src.getRange(1, 1, src.getLastRow(), 8).getValues();
+
+  const headers = ['Дата', 'Время', 'Дата перевода', 'Время перевода', '№ заказа',
+                   'Сумма курьеру, ₸', 'Сумма заказа, ₸', 'Служба', 'Кто прислал', 'Чек', 'Чат'];
+  const sheet = getOrCreateSheet(SHEET_RECEIPTS, headers);
+  ensureColumn(sheet, 'Дата перевода', 2);
+  ensureColumn(sheet, 'Время перевода', 3);
+  ensureColumnAfterName(sheet, 'Филиал', 'Служба');
+  ensureColumnAfterName(sheet, 'Адрес', 'Филиал');
+  ensureColumnAfterName(sheet, 'Тип доставки', 'Адрес');
+
+  // Что уже лежит в листе — чтобы не задваивать
+  const head = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
+  const col = function (name) { return head.indexOf(name); };
+  const seen = {};
+  if (sheet.getLastRow() > 1) {
+    const have = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
+    have.forEach(function (r) {
+      const d = String(r[col('Дата перевода')] || '').replace(/^'/, '').trim();
+      const a = String(r[col('Адрес')] || '').trim().toLowerCase();
+      seen[d + '|' + a + '|' + Math.round(ymNum_(r[col('Сумма курьеру, ₸')]))] = true;
+    });
+  }
+
+  let cur = null, added = 0, skipped = 0, dup = 0;
+  const out = [];
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const mh = ymMonth_(r[0]);
+    if (mh) cur = mh;                                  // запомнили месяц раздела
+
+    const day = ymNum_(r[1]);
+    const sum = ymNum_(r[4]);
+    const note = String(r[6] || '').trim();
+    const isMonthRow = !!ymMonth_(r[0]);
+    if (!day || day < 1 || day > 31 || sum <= 0) { skipped++; continue; }
+    if (isMonthRow || /директор/i.test(note)) { skipped++; continue; }   // пополнение кассы, не оплата курьеру
+    if (!cur) { skipped++; continue; }
+
+    const date = cur.y + '-' + ('0' + cur.m).slice(-2) + '-' + ('0' + day).slice(-2);
+    const addr = String(r[2] || '').trim();
+    const key = date + '|' + addr.toLowerCase() + '|' + Math.round(sum);
+    if (seen[key]) { dup++; continue; }
+    seen[key] = true;
+
+    const val = {
+      'Дата': '', 'Время': '',
+      'Дата перевода': "'" + date,
+      'Время перевода': '',
+      '№ заказа': '',
+      'Сумма курьеру, ₸': sum,
+      'Сумма заказа, ₸': ymNum_(r[7]) || '',
+      'Служба': String(r[3] || '').trim(),
+      'Филиал': String(r[0] || '').trim().toUpperCase().replace(/\s+/g, ''),
+      'Адрес': addr,
+      'Тип доставки': String(r[5] || '').trim(),
+      'Кто прислал': 'перенос из «Яндекс отчет»',
+      'Чек': '', 'Чат': ''
+    };
+    out.push(head.map(function (h) { return h in val ? val[h] : ''; }));
+    added++;
+  }
+
+  if (out.length) {
+    sheet.getRange(sheet.getLastRow() + 1, 1, out.length, head.length).setValues(out);
+  }
+  return tell_('Перенесено строк: ' + added + '. Пропущено служебных: ' + skipped +
+               '. Уже были в листе: ' + dup + '.');
+}
+
 // ── Опрос вместо вебхука ────────────────────────────────────
 // Телеграм отвечает на вебхук Apps Script ошибкой «302 Found»: скрипт
 // отдаёт переадресацию, а Телеграм за ней не идёт и считает доставку

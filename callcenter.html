@@ -5339,9 +5339,11 @@ async function rcLoad() {
       toCour:  numOrZero(x['Сумма курьеру, ₸']),
       orderSum:numOrZero(x['Сумма заказа, ₸']),
       service: un(x['Служба']),
+      branch:  un(x['Филиал']),
+      addr:    un(x['Адрес']),
       who:     un(x['Кто прислал']),
       link:    un(x['Чек'])
-    })).filter(x => x.num);
+    })).filter(x => x.num || x.toCour);
     rcLoaded = true; rcErr = '';
   } catch (e) {
     rcErr = 'Не вышло забрать чеки: ' + e.message;
@@ -5375,17 +5377,20 @@ function renderReceipts() {
   // Дни, по которым заказы вообще загружены: только их и судим
   const covered = new Set(orders.map(o => o.date).filter(Boolean));
 
-  // Чеки по номеру заказа
+  // Чеки по номеру заказа. Перенесённые из «Яндекс отчета» строки номера не имеют —
+  // их держим отдельно, иначе они притворятся чеками без заказа.
+  const noNum = rcRows.filter(r => !r.num);
+  const withNum = rcRows.filter(r => r.num);
   const byNum = {};
-  rcRows.forEach(r => { (byNum[r.num] = byNum[r.num] || []).push(r); });
+  withNum.forEach(r => { (byNum[r.num] = byNum[r.num] || []).push(r); });
 
   const need = orders.filter(rcNeeds);
   const missing = need.filter(o => !byNum[o.num]);
-  const orphan  = rcRows.filter(r => !ordBase[r.num] && covered.has(r.date));
-  const unknown = rcRows.filter(r => !ordBase[r.num] && !covered.has(r.date));
+  const orphan  = withNum.filter(r => !ordBase[r.num] && covered.has(r.date));
+  const unknown = withNum.filter(r => !ordBase[r.num] && !covered.has(r.date));
   const twice   = Object.keys(byNum).filter(n => byNum[n].length > 1 && ordBase[n]);
   const mismatch = [], quiet = [];
-  rcRows.forEach(r => {
+  withNum.forEach(r => {
     const o = ordBase[r.num];
     if (!o) return;
     if (r.orderSum && Math.round(r.orderSum) !== Math.round(o.sum || 0))
@@ -5445,6 +5450,13 @@ function renderReceipts() {
       <div class="s-sub">Эти чеки не проверены — догрузите 0080 за ${
         [...new Set(unknown.map(r => ruDate(r.date)))].join(', ')}.</div></div></div>`;
 
+  if (noNum.length) html += `<div class="status-box s-warn" style="margin-top:12px;">
+    <div class="s-icon">📋</div><div>
+      <div class="s-title">${plural(noNum.length, 'строка', 'строки', 'строк')} без номера заказа — на ${
+        money(noNum.reduce((s, r) => s + r.toCour, 0))}</div>
+      <div class="s-sub">Это переносы из старых таблиц: там записывали адрес, а не номер.
+        С отчётом 0080 по номеру их не сверить — сверяйте по адресу и дате вручную.</div></div></div>`;
+
   if (quiet.length) html += `<div style="margin-top:12px;font-size:12px;color:var(--text3);">
     Ниже порога бесплатной доставки, а перевод был — доставку оплачивал клиент,
     проверьте, вернули ли деньги в кассу:<br>${
@@ -5459,12 +5471,12 @@ function renderReceipts() {
 
   if (rcRows.length) html += `<div class="tbl-wrap" style="overflow-x:auto;margin-top:14px;">
     <table class="tbl"><thead><tr><th>Дата</th><th>Время</th><th>№</th>
-      <th>Курьеру</th><th>Сумма заказа</th><th>Служба</th><th>Кто прислал</th><th>Чек</th></tr></thead>
+      <th>Курьеру</th><th>Сумма заказа</th><th>Служба</th><th>Адрес</th><th>Кто прислал</th><th>Чек</th></tr></thead>
     <tbody>${rcRows.slice().sort((a,b) =>
       (a.date + a.time).localeCompare(b.date + b.time)).map(r => `<tr>
-      <td>${ruDate(r.date)}</td><td>${r.time}</td><td>№${r.num}</td>
+      <td>${ruDate(r.date)}</td><td>${r.time}</td><td>${r.num ? '№' + r.num : '—'}</td>
       <td>${money(r.toCour)}</td><td>${r.orderSum ? money(r.orderSum) : '—'}</td>
-      <td>${r.service}</td><td>${r.who}</td>
+      <td>${r.service}</td><td>${[r.branch, r.addr].filter(Boolean).join(' · ')}</td><td>${r.who}</td>
       <td>${/^https?:/.test(r.link) ? '<a href="' + r.link + '" target="_blank" rel="noopener">открыть</a>' : ''}</td>
     </tr>`).join('')}</tbody></table></div>`;
 
