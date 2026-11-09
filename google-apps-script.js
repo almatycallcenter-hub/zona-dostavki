@@ -42,6 +42,13 @@ function doGet(e) {
     return jsonResponse(getProducts());
   }
 
+  if (action === 'tgDiag') {
+    const info = tgApi_('getWebhookInfo', {});
+    if (info && info.result && info.result.url)
+      info.result.url = String(info.result.url).replace(/\?s=.*$/, '?s=***');
+    return jsonResponse({ status: 'ok', data: info });
+  }
+
   if (action === 'getReceipts') {
     return jsonResponse(getReceipts(e.parameter.from || '', e.parameter.to || ''));
   }
@@ -85,6 +92,7 @@ function doPost(e) {
     return jsonResponse({ status: 'error', message: 'Неизвестный тип данных' });
 
   } catch (err) {
+    Logger.log('doPost упал: ' + err + ' ' + (err.stack || ''));
     return jsonResponse({ status: 'error', message: err.message });
   }
 }
@@ -836,7 +844,9 @@ function tgSend_(chat, text, keys) {
   if (keys) p.reply_markup = { keyboard: keys.map(function (k) { return [{ text: k }]; }),
                                resize_keyboard: true, one_time_keyboard: true };
   else p.reply_markup = { remove_keyboard: true };
-  tgApi_('sendMessage', p);
+  const r = tgApi_('sendMessage', p);
+  if (!r || !r.ok) Logger.log('sendMessage не ушло: ' + JSON.stringify(r));
+  return r;
 }
 
 // Состояние диалога держим в свойствах: один оператор — одна незаконченная запись
@@ -857,8 +867,9 @@ function tgUpdate_(u) {
   try {
     const cache = CacheService.getScriptCache();
     const key = 'tgu_' + u.update_id;
-    if (cache.get(key)) return;          // это повтор — молчим
+    if (cache.get(key)) { Logger.log('повтор ' + u.update_id); return; }
     cache.put(key, '1', 3600);
+    Logger.log('обновление ' + u.update_id + ': ' + JSON.stringify(u.message || u.edited_message || {}).slice(0, 600));
     tgHandle_(u);
   } finally {
     try { lock.releaseLock(); } catch (e) {}
@@ -878,7 +889,10 @@ function tgHandle_(u) {
 
   if (text === '/start' || /^отмена$/i.test(text) || text === '/otmena') {
     tgState_(chat, null);
-    tgSend_(chat, 'Пришлите чек об оплате курьеру — фото или PDF. Дальше спрошу номер заказа, сумму и службу.\n\nНаписать «отмена» можно в любой момент.');
+    tgSend_(chat, 'Пришлите чек об оплате курьеру — фото или PDF.\n\n' +
+                  'Быстрее всего — написать подписью к чеку: номер заказа, сумму курьеру и службу. ' +
+                  'Например: 4850 2550 wolt\n\n' +
+                  'Если подписи нет, спрошу всё по очереди. Написать «отмена» можно в любой момент.');
     return;
   }
 
@@ -886,9 +900,28 @@ function tgHandle_(u) {
   const fileId = (m.document && m.document.file_id) ||
                  (m.photo && m.photo.length && m.photo[m.photo.length - 1].file_id) || '';
   if (fileId) {
-    tgState_(chat, { step: 'order', fileId: fileId,
-                     fname: (m.document && m.document.file_name) || '',
-                     who: who, at: new Date().toISOString() });
+    const st0 = { fileId: fileId, fname: (m.document && m.document.file_name) || '',
+                  who: who, at: new Date().toISOString() };
+    // Быстрый путь: всё написано подписью к чеку — «4850 2550 wolt»
+    const cap = tgCaption_(m.caption);
+    if (cap && cap.service) {
+      st0.order = cap.order; st0.sum = cap.sum;
+      st0.osum = cap.osum; st0.service = cap.service;
+      let link0 = '';
+      try { link0 = tgSaveFile_(st0); } catch (err) { link0 = 'ошибка: ' + err.message; }
+      tgSaveRow_(chat, st0, link0);
+      tgState_(chat, null);
+      tgSend_(chat, 'Записала.\n№ ' + st0.order + ' · курьеру ' + tgMoney_(st0.sum) + ' ₸' +
+              (st0.osum ? ' · заказ ' + tgMoney_(st0.osum) + ' ₸' : '') + ' · ' + st0.service);
+      return;
+    }
+    if (cap) { st0.order = cap.order; st0.sum = cap.sum; st0.osum = cap.osum; st0.step = 'service';
+               tgState_(chat, st0);
+               tgSend_(chat, 'Чек принял: № ' + cap.order + ', курьеру ' + tgMoney_(cap.sum) +
+                             ' ₸.\nЧерез кого отправили?', TG_SERVICES);
+               return; }
+    st0.step = 'order';
+    tgState_(chat, st0);
     tgSend_(chat, 'Чек принял. Номер заказа? (только цифры)');
     return;
   }
@@ -933,6 +966,29 @@ function tgHandle_(u) {
             '\n\nСледующий чек — просто пришлите файл.');
     return;
   }
+}
+
+// Подпись к чеку вида «4850 2550 wolt»: номер заказа, сумма курьеру,
+// необязательно сумма заказа, необязательно служба. Так оператор
+// закрывает чек одним сообщением, а не пятью.
+function tgCaption_(s) {
+  const t = String(s == null ? '' : s).trim();
+  if (!t) return null;
+  const nums = t.match(/\d[\d\s.,]*/g) || [];
+  if (nums.length < 2) return null;
+  const num = function (x) {
+    return Number(String(x).replace(/[^\d.,]/g, '').replace(/\s/g, '').replace(',', '.'));
+  };
+  const order = String(nums[0]).replace(/\D/g, '');
+  const sum = num(nums[1]);
+  if (!order || !sum) return null;
+  const osum = nums.length >= 3 ? num(nums[2]) : 0;
+  const low = t.toLowerCase();
+  let service = '';
+  TG_SERVICES.forEach(function (s2) {
+    if (low.indexOf(s2.toLowerCase().slice(0, 4)) >= 0) service = s2;
+  });
+  return { order: order, sum: sum, osum: osum, service: service };
 }
 
 function tgMoney_(n) {
@@ -985,6 +1041,45 @@ function getReceipts(from, to) {
     out.push(o);
   }
   return { status: 'ok', data: out };
+}
+
+// ── Опрос вместо вебхука ────────────────────────────────────
+// Телеграм отвечает на вебхук Apps Script ошибкой «302 Found»: скрипт
+// отдаёт переадресацию, а Телеграм за ней не идёт и считает доставку
+// неудачной — шлёт одно и то же снова, а новые сообщения копятся в очереди.
+// Поэтому сообщения забираем сами: раз в минуту запускается tgPoll и
+// в течение пятидесяти секунд держит открытым запрос getUpdates.
+function tgPoll() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(1000)) return;          // предыдущий проход ещё идёт
+  try {
+    const p = PropertiesService.getScriptProperties();
+    const until = Date.now() + 50000;
+    while (Date.now() < until) {
+      const offset = Number(p.getProperty('TG_OFFSET') || 0);
+      const r = tgApi_('getUpdates', { offset: offset, timeout: 20, allowed_updates: ['message'] });
+      if (!r || !r.ok) { Logger.log('getUpdates: ' + JSON.stringify(r)); break; }
+      const ups = r.result || [];
+      for (let i = 0; i < ups.length; i++) {
+        p.setProperty('TG_OFFSET', String(ups[i].update_id + 1));
+        try { tgHandle_(ups[i]); }
+        catch (e) { Logger.log('обновление ' + ups[i].update_id + ': ' + e); }
+      }
+    }
+  } finally {
+    try { lock.releaseLock(); } catch (e) {}
+  }
+}
+
+// Запустить один раз: снимает вебхук и ставит опрос раз в минуту
+function tgUsePolling() {
+  tgApi_('deleteWebhook', {});
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'tgPoll') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('tgPoll').timeBased().everyMinutes(1).create();
+  Logger.log('Опрос включён: вебхук снят, tgPoll запускается каждую минуту.');
+  return 'Опрос включён';
 }
 
 // ── Разовая настройка вебхука ───────────────────────────────
