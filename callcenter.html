@@ -889,6 +889,21 @@ details[open] > summary .chev { transform:rotate(90deg); }
       <div id="skOut"></div>
     </div>
 
+    <div class="card" id="rcCard" style="display:none;">
+      <div class="card-head">
+        <div><div class="card-title">🧾 Чеки курьерам</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px;">
+          что операторы прислали в бот — против того, что показывает 0080</div></div>
+        <span class="badge by" id="rcBadge">—</span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+        <button class="btn btn-o btn-sm" onclick="rcLoad()">Загрузить чеки</button>
+        <span style="font-size:11px;color:var(--text3);" id="rcHint">
+          берём чеки за те же дни, что и загруженные заказы</span>
+      </div>
+      <div id="rcOut"></div>
+    </div>
+
     <div class="card" id="clCard" style="display:none;">
       <div class="card-head">
         <div><div class="card-title">👥 Клиенты по категориям</div>
@@ -4794,6 +4809,7 @@ async function ordAddFile(file) {
         if (!o.num) return;
         ordBase[o.num] = Object.assign({
           num:o.num, date:o.uchDate, time: o.planDT ? dtTime(o.planDT).slice(0,5) : '',
+          dtype:o.dtype,
           client:o.client, phone:o.phone || o.phoneD, comment:o.comment,
           sum:o.sum, addr:o.addr, courier:o.courier, oper:o.oper
         }, ordBase[o.num] || {});
@@ -4885,6 +4901,7 @@ function renderOrders() {
     sum.innerHTML = ''; box.innerHTML = '';
     renderClients();
     renderSklad();
+    renderReceipts();
     return;
   }
 
@@ -4923,6 +4940,7 @@ function renderOrders() {
 
   renderClients();
   renderSklad();
+  renderReceipts();
 
   box.innerHTML = list.map(o => {
     const it   = ordItems[o.num];
@@ -5270,8 +5288,190 @@ function clDownload() {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
+
+// ══════════════════════════════════════════════════
+//  ЧЕКИ КУРЬЕРАМ
+//  Оператор кидает чек Kaspi в телеграм-бот, бот пишет строку в лист
+//  «Чеки курьерам». Здесь эти строки встречаются с отчётом 0080.
+//  Платит курьера компания тогда, когда доставка клиенту бесплатна,
+//  то есть от порога на эту дату (до 02.09.2026 — 17 500, с 02.09 — 30 000).
+// ══════════════════════════════════════════════════
+let rcRows = [], rcLoaded = false, rcErr = '';
+
+// Сумма товаров без услуги доставки — её и сравниваем с порогом
+function rcGoods(o) {
+  const it = ordItems[o.num];
+  if (!it) return o.sum || 0;
+  const d = it.items.filter(i => /достав/i.test(i.dish || ''))
+                    .reduce((s, i) => s + (i.sum || 0), 0);
+  return (o.sum || 0) - d;
+}
+
+// Должен ли по этому заказу быть чек
+function rcNeeds(o) {
+  if (ordCancelled(o)) return false;
+  if (isPickup(o)) return false;
+  if (!o.date) return false;
+  return rcGoods(o) >= freeFrom(o.date);
+}
+
+async function rcLoad() {
+  const url = ls('scriptUrl');
+  const out = document.getElementById('rcOut');
+  if (!url) {
+    rcErr = 'Сначала впишите адрес Google Apps Script в разделе ⚙️ Настройки.';
+    renderReceipts(); return;
+  }
+  const days = Object.values(ordBase).map(o => o.date).filter(Boolean).sort();
+  const from = days[0] || '', to = days[days.length - 1] || '';
+  out.innerHTML = '<div style="text-align:center;padding:18px;color:var(--text3);">⏳ Загружаем чеки…</div>';
+  try {
+    const r = await fetch(url + '?action=getReceipts&from=' + from + '&to=' + to);
+    const j = await r.json();
+    if (j.status !== 'ok') throw new Error(j.message || 'таблица ответила ошибкой');
+    const un = s => String(s == null ? '' : s).replace(/^'/, '').trim();
+    rcRows = (j.data || []).map(x => ({
+      date:    un(x['Дата']),
+      time:    un(x['Время']),
+      num:     un(x['№ заказа']),
+      toCour:  numOrZero(x['Сумма курьеру, ₸']),
+      orderSum:numOrZero(x['Сумма заказа, ₸']),
+      service: un(x['Служба']),
+      who:     un(x['Кто прислал']),
+      link:    un(x['Чек'])
+    })).filter(x => x.num);
+    rcLoaded = true; rcErr = '';
+  } catch (e) {
+    rcErr = 'Не вышло забрать чеки: ' + e.message;
+  }
+  renderReceipts();
+}
+
+function renderReceipts() {
+  const card = document.getElementById('rcCard');
+  const out  = document.getElementById('rcOut');
+  const bdg  = document.getElementById('rcBadge');
+  if (!card) return;
+  const orders = Object.values(ordBase);
+  if (!orders.length) { card.style.display = 'none'; return; }
+  card.style.display = '';
+
+  if (rcErr) {
+    bdg.className = 'badge br'; bdg.textContent = 'Ошибка';
+    out.innerHTML = `<div class="status-box s-err"><div class="s-icon">❌</div>
+      <div><div class="s-title">${rcErr}</div></div></div>`;
+    return;
+  }
+  if (!rcLoaded) {
+    bdg.className = 'badge by'; bdg.textContent = 'Не загружены';
+    out.innerHTML = `<div style="font-size:12px;color:var(--text3);padding:4px 0;">
+      Нажмите «Загрузить чеки» — тул заберёт их из листа «Чеки курьерам»
+      и покажет, по каким заказам чека нет, а по каким он лишний.</div>`;
+    return;
+  }
+
+  // Дни, по которым заказы вообще загружены: только их и судим
+  const covered = new Set(orders.map(o => o.date).filter(Boolean));
+
+  // Чеки по номеру заказа
+  const byNum = {};
+  rcRows.forEach(r => { (byNum[r.num] = byNum[r.num] || []).push(r); });
+
+  const need = orders.filter(rcNeeds);
+  const missing = need.filter(o => !byNum[o.num]);
+  const orphan  = rcRows.filter(r => !ordBase[r.num] && covered.has(r.date));
+  const unknown = rcRows.filter(r => !ordBase[r.num] && !covered.has(r.date));
+  const twice   = Object.keys(byNum).filter(n => byNum[n].length > 1 && ordBase[n]);
+  const mismatch = [], quiet = [];
+  rcRows.forEach(r => {
+    const o = ordBase[r.num];
+    if (!o) return;
+    if (r.orderSum && Math.round(r.orderSum) !== Math.round(o.sum || 0))
+      mismatch.push({ r, o });
+    if (!rcNeeds(o) && !ordCancelled(o)) quiet.push({ r, o });
+  });
+
+  const bad = missing.length + orphan.length + twice.length;
+  bdg.className = bad ? 'badge br' : 'badge bg';
+  bdg.textContent = bad ? 'Разбирать: ' + bad : 'Всё сходится';
+
+  const money = n => Number(n || 0).toLocaleString('ru-RU',
+                      { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₸';
+  const row = o => `№${o.num} · ${ruDate(o.date)}${o.time ? ' ' + o.time : ''} · ${
+                    o.client || 'без имени'} · ${money(rcGoods(o))}`;
+
+  let html = `<div class="kpi-row">
+    <div class="kpi"><div class="kpi-label">Чеков в базе</div><div class="kpi-val">${rcRows.length}</div></div>
+    <div class="kpi g"><div class="kpi-label">Заказов с чеком</div>
+      <div class="kpi-val">${need.length - missing.length}</div>
+      <div class="kpi-sub">из ${need.length}, которые платит компания</div></div>
+    <div class="kpi ${missing.length ? 'r' : ''}"><div class="kpi-label">Без чека</div>
+      <div class="kpi-val">${missing.length}</div></div>
+    <div class="kpi ${orphan.length ? 'r' : ''}"><div class="kpi-label">Чек без заказа</div>
+      <div class="kpi-val">${orphan.length}</div></div>
+  </div>`;
+
+  if (missing.length) html += `<div class="status-box s-err" style="margin-top:12px;">
+    <div class="s-icon">❌</div><div>
+      <div class="s-title">${plural(missing.length, 'заказ ждёт', 'заказа ждут', 'заказов ждут')} чек</div>
+      <div class="s-sub">Доставка бесплатная, значит курьера оплатила компания — перевод должен быть.<br>
+        ${missing.map(row).join('<br>')}</div></div></div>`;
+
+  if (orphan.length) html += `<div class="status-box s-err" style="margin-top:12px;">
+    <div class="s-icon">🔍</div><div>
+      <div class="s-title">Чек есть, а заказа такого нет</div>
+      <div class="s-sub">Номер набрали с ошибкой или заказ отменили уже после оплаты курьера.<br>
+        ${orphan.map(r => `№${r.num} · ${ruDate(r.date)} ${r.time} · ${
+          money(r.toCour)} · ${r.service} · ${r.who}`).join('<br>')}</div></div></div>`;
+
+  if (twice.length) html += `<div class="status-box s-err" style="margin-top:12px;">
+    <div class="s-icon">⚠️</div><div>
+      <div class="s-title">На один заказ прислали несколько чеков</div>
+      <div class="s-sub">${twice.map(n => `№${n} — ${byNum[n].length} чека: ` +
+        byNum[n].map(r => money(r.toCour) + ' (' + r.who + ')').join(', ')).join('<br>')}</div>
+      </div></div>`;
+
+  if (mismatch.length) html += `<div class="status-box s-warn" style="margin-top:12px;">
+    <div class="s-icon">💬</div><div>
+      <div class="s-title">Сумма заказа в чеке не сходится с 0080</div>
+      <div class="s-sub">${mismatch.map(m => `№${m.r.num}: оператор написал ${
+        money(m.r.orderSum)}, в 0080 — ${money(m.o.sum)}`).join('<br>')}</div></div></div>`;
+
+  if (unknown.length) html += `<div class="status-box s-warn" style="margin-top:12px;">
+    <div class="s-icon">📅</div><div>
+      <div class="s-title">${plural(unknown.length, 'чек', 'чека', 'чеков')} за день, которого нет в выгрузке</div>
+      <div class="s-sub">Эти чеки не проверены — догрузите 0080 за ${
+        [...new Set(unknown.map(r => ruDate(r.date)))].join(', ')}.</div></div></div>`;
+
+  if (quiet.length) html += `<div style="margin-top:12px;font-size:12px;color:var(--text3);">
+    Ниже порога бесплатной доставки, а перевод был — доставку оплачивал клиент,
+    проверьте, вернули ли деньги в кассу:<br>${
+    quiet.map(q => `№${q.r.num} · ${money(q.r.toCour)} · ${q.r.service} · ${q.r.who}`).join('<br>')}</div>`;
+
+  if (!bad && !mismatch.length && !unknown.length)
+    html += `<div class="status-box s-ok" style="margin-top:12px;">
+      <div class="s-icon">✅</div><div>
+        <div class="s-title">Все платные доставки закрыты чеками</div>
+        <div class="s-sub">Проверено ${plural(need.length, 'заказ', 'заказа', 'заказов')
+          } за ${plural(covered.size, 'день', 'дня', 'дней')}.</div></div></div>`;
+
+  if (rcRows.length) html += `<div class="tbl-wrap" style="overflow-x:auto;margin-top:14px;">
+    <table class="tbl"><thead><tr><th>Дата</th><th>Время</th><th>№</th>
+      <th>Курьеру</th><th>Сумма заказа</th><th>Служба</th><th>Кто прислал</th><th>Чек</th></tr></thead>
+    <tbody>${rcRows.slice().sort((a,b) =>
+      (a.date + a.time).localeCompare(b.date + b.time)).map(r => `<tr>
+      <td>${ruDate(r.date)}</td><td>${r.time}</td><td>№${r.num}</td>
+      <td>${money(r.toCour)}</td><td>${r.orderSum ? money(r.orderSum) : '—'}</td>
+      <td>${r.service}</td><td>${r.who}</td>
+      <td>${/^https?:/.test(r.link) ? '<a href="' + r.link + '" target="_blank" rel="noopener">открыть</a>' : ''}</td>
+    </tr>`).join('')}</tbody></table></div>`;
+
+  out.innerHTML = html;
+}
+
 function ordReset() {
   ordBase = {}; ordItems = {}; ordFiles = []; ordClash = []; clPicked = new Set(); skDays = [];
+  rcRows = []; rcLoaded = false; rcErr = '';
   const z = document.getElementById('ordZone');
   z.className = 'upload-zone';
   renderOrders();

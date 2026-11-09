@@ -17,6 +17,7 @@ const SHEET_ID = 'ВСТАВЬТЕ_ID_ТАБЛИЦЫ_СЮДА';
 // ── Названия листов ──────────────────────────────────────────
 const SHEET_SHIFTS       = 'Смены';
 const SHEET_TRANSACTIONS = 'Транзакции';
+const SHEET_RECEIPTS     = 'Чеки курьерам';
 
 // ════════════════════════════════════════════════════════════
 //  GET — получение данных (история смен)
@@ -41,6 +42,10 @@ function doGet(e) {
     return jsonResponse(getProducts());
   }
 
+  if (action === 'getReceipts') {
+    return jsonResponse(getReceipts(e.parameter.from || '', e.parameter.to || ''));
+  }
+
   return jsonResponse({ status: 'ok', message: 'ТӘП-ТӘТТІ API работает' });
 }
 
@@ -50,6 +55,17 @@ function doGet(e) {
 function doPost(e) {
   try {
     const data = JSON.parse(e.postData.contents);
+
+    // Телеграм шлёт обновления в том же /exec. Узнаём их по update_id.
+    // Заголовки в Apps Script недоступны, поэтому секрет едет в адресе: /exec?s=…
+    if (data.update_id) {
+      const cfg = tgCfg_();
+      if (!cfg.secret || e.parameter.s !== cfg.secret) {
+        return jsonResponse({ status: 'error', message: 'нет доступа' });
+      }
+      tgUpdate_(data);
+      return jsonResponse({ status: 'ok' });
+    }
 
     if (data.type === 'shift') {
       saveShift(data);
@@ -784,4 +800,190 @@ function shiftAllDatesBackward() {
   shiftSheet(SHEET_TRANSACTIONS, ['Дата', 'Дата заказа']);
 
   SpreadsheetApp.getUi().alert('Готово! Все даты сдвинуты на -1 день.');
+}
+
+
+// ════════════════════════════════════════════════════════════
+//  ТЕЛЕГРАМ-БОТ: чеки за курьеров
+//  Оператор кидает чек, бот спрашивает номер заказа, сумму и службу.
+//  Файл ложится в Drive, строка — в лист «Чеки курьерам».
+//  Токен и секрет лежат в свойствах скрипта, в коде их нет.
+// ════════════════════════════════════════════════════════════
+const TG_SERVICES = ['Wolt', 'Яндекс', 'Индрайвер', 'Свой курьер'];
+
+function tgCfg_() {
+  const p = PropertiesService.getScriptProperties();
+  return {
+    token:  p.getProperty('TG_TOKEN')  || '',
+    secret: p.getProperty('TG_SECRET') || '',
+    url:    p.getProperty('TG_EXEC_URL') || '',
+    chats:  String(p.getProperty('TG_CHATS') || '').split(',').map(function (s) { return s.trim(); }).filter(String)
+  };
+}
+
+function tgApi_(method, payload) {
+  const c = tgCfg_();
+  if (!c.token) throw new Error('Не задан TG_TOKEN в свойствах скрипта');
+  const r = UrlFetchApp.fetch('https://api.telegram.org/bot' + c.token + '/' + method, {
+    method: 'post', contentType: 'application/json',
+    payload: JSON.stringify(payload), muteHttpExceptions: true
+  });
+  return JSON.parse(r.getContentText());
+}
+
+function tgSend_(chat, text, keys) {
+  const p = { chat_id: chat, text: text };
+  if (keys) p.reply_markup = { keyboard: keys.map(function (k) { return [{ text: k }]; }),
+                               resize_keyboard: true, one_time_keyboard: true };
+  else p.reply_markup = { remove_keyboard: true };
+  tgApi_('sendMessage', p);
+}
+
+// Состояние диалога держим в свойствах: один оператор — одна незаконченная запись
+function tgState_(chat, val) {
+  const p = PropertiesService.getScriptProperties(), k = 'tgst_' + chat;
+  if (val === undefined) { const s = p.getProperty(k); return s ? JSON.parse(s) : null; }
+  if (val === null) p.deleteProperty(k); else p.setProperty(k, JSON.stringify(val));
+  return val;
+}
+
+function tgUpdate_(u) {
+  const m = u.message || u.edited_message;
+  if (!m) return;
+  const chat = m.chat.id, cfg = tgCfg_();
+  if (cfg.chats.length && cfg.chats.indexOf(String(chat)) < 0) {
+    tgSend_(chat, 'Этот бот только для колл-центра Тәп-Тәтті.');
+    return;
+  }
+  const who = [m.from && m.from.first_name, m.from && m.from.username].filter(String).join(' @');
+  const text = String(m.text || '').trim();
+
+  if (text === '/start' || /^отмена$/i.test(text) || text === '/otmena') {
+    tgState_(chat, null);
+    tgSend_(chat, 'Пришлите чек об оплате курьеру — фото или PDF. Дальше спрошу номер заказа, сумму и службу.\n\nНаписать «отмена» можно в любой момент.');
+    return;
+  }
+
+  // Чек: фото или файл
+  const fileId = (m.document && m.document.file_id) ||
+                 (m.photo && m.photo.length && m.photo[m.photo.length - 1].file_id) || '';
+  if (fileId) {
+    tgState_(chat, { step: 'order', fileId: fileId,
+                     fname: (m.document && m.document.file_name) || '',
+                     who: who, at: new Date().toISOString() });
+    tgSend_(chat, 'Чек принял. Номер заказа? (только цифры)');
+    return;
+  }
+
+  const st = tgState_(chat);
+  if (!st) {
+    tgSend_(chat, 'Сначала пришлите чек — фото или PDF.');
+    return;
+  }
+
+  if (st.step === 'order') {
+    const num = text.replace(/\D/g, '');
+    if (!num) { tgSend_(chat, 'Нужен номер заказа цифрами, например 4850.'); return; }
+    st.order = num; st.step = 'sum'; tgState_(chat, st);
+    tgSend_(chat, 'Сколько перевели курьеру, тенге?');
+    return;
+  }
+
+  if (st.step === 'sum') {
+    const sum = Number(text.replace(/[^\d.,]/g, '').replace(/\s/g, '').replace(',', '.'));
+    if (!sum || sum <= 0) { tgSend_(chat, 'Нужна сумма числом, например 2065.'); return; }
+    st.sum = sum; st.step = 'osum'; tgState_(chat, st);
+    tgSend_(chat, 'Сумма самого заказа, тенге? Если не знаете — напишите 0.');
+    return;
+  }
+
+  if (st.step === 'osum') {
+    const os = Number(text.replace(/[^\d.,]/g, '').replace(/\s/g, '').replace(',', '.')) || 0;
+    st.osum = os; st.step = 'service'; tgState_(chat, st);
+    tgSend_(chat, 'Через кого отправили?', TG_SERVICES);
+    return;
+  }
+
+  if (st.step === 'service') {
+    st.service = text;
+    let link = '';
+    try { link = tgSaveFile_(st); } catch (err) { link = 'ошибка: ' + err.message; }
+    tgSaveRow_(chat, st, link);
+    tgState_(chat, null);
+    tgSend_(chat, 'Записала.\n№ ' + st.order + ' · курьеру ' + tgMoney_(st.sum) + ' ₸' +
+            (st.osum ? ' · заказ ' + tgMoney_(st.osum) + ' ₸' : '') + ' · ' + st.service +
+            '\n\nСледующий чек — просто пришлите файл.');
+    return;
+  }
+}
+
+function tgMoney_(n) {
+  return Number(n).toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+}
+
+function tgSaveFile_(st) {
+  const c = tgCfg_();
+  const info = tgApi_('getFile', { file_id: st.fileId });
+  if (!info.ok) throw new Error('файл не отдался');
+  const path = info.result.file_path;
+  const blob = UrlFetchApp.fetch('https://api.telegram.org/file/bot' + c.token + '/' + path).getBlob();
+  const parents = DriveApp.getFileById(SHEET_ID).getParents();
+  const root = parents.hasNext() ? parents.next() : DriveApp.getRootFolder();
+  const it = root.getFoldersByName('Чеки курьерам');
+  const folder = it.hasNext() ? it.next() : root.createFolder('Чеки курьерам');
+  const ext = (path.match(/\.[a-z0-9]+$/i) || ['.jpg'])[0];
+  blob.setName('Заказ ' + st.order + ' — ' + tgMoney_(st.sum) + ' тг' + ext);
+  return folder.createFile(blob).getUrl();
+}
+
+function tgSaveRow_(chat, st, link) {
+  const headers = ['Дата', 'Время', '№ заказа', 'Сумма курьеру, ₸', 'Сумма заказа, ₸',
+                   'Служба', 'Кто прислал', 'Чек', 'Чат'];
+  const sheet = getOrCreateSheet(SHEET_RECEIPTS, headers);
+  const tz = SpreadsheetApp.openById(SHEET_ID).getSpreadsheetTimeZone();
+  const now = new Date();
+  sheet.appendRow([
+    "'" + Utilities.formatDate(now, tz, 'yyyy-MM-dd'),
+    Utilities.formatDate(now, tz, 'HH:mm'),
+    "'" + st.order, st.sum, st.osum || '', st.service, st.who,
+    link ? '=HYPERLINK("' + link + '";"открыть")' : '', String(chat)
+  ]);
+}
+
+// Отдаём чеки в тул: он сверит их с отчётом 0080
+function getReceipts(from, to) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_RECEIPTS);
+  if (!sheet || sheet.getLastRow() < 2) return { status: 'ok', data: [] };
+  const vals = sheet.getRange(1, 1, sheet.getLastRow(), sheet.getLastColumn()).getValues();
+  const head = vals[0].map(String);
+  const out = [];
+  for (let i = 1; i < vals.length; i++) {
+    const o = {};
+    head.forEach(function (h, c) { o[h] = normalizeCell(h, vals[i][c]); });
+    const d = String(o['Дата'] || '').replace(/^'/, '');
+    if (from && d < from) continue;
+    if (to && d > to) continue;
+    out.push(o);
+  }
+  return { status: 'ok', data: out };
+}
+
+// ── Разовая настройка вебхука ───────────────────────────────
+// Заполните свойства скрипта TG_TOKEN, TG_SECRET, TG_EXEC_URL, TG_CHATS
+// и запустите эту функцию один раз.
+function tgSetWebhook() {
+  const c = tgCfg_();
+  if (!c.token || !c.secret || !c.url) {
+    SpreadsheetApp.getUi().alert('Заполните TG_TOKEN, TG_SECRET и TG_EXEC_URL в свойствах скрипта.');
+    return;
+  }
+  const r = tgApi_('setWebhook', { url: c.url + '?s=' + encodeURIComponent(c.secret),
+                                   allowed_updates: ['message'] });
+  SpreadsheetApp.getUi().alert(r.ok ? 'Вебхук подключён.' : 'Не вышло: ' + JSON.stringify(r));
+}
+
+function tgDeleteWebhook() {
+  const r = tgApi_('deleteWebhook', {});
+  SpreadsheetApp.getUi().alert(r.ok ? 'Вебхук снят.' : JSON.stringify(r));
 }
