@@ -46,7 +46,8 @@ function doGet(e) {
     const info = tgApi_('getWebhookInfo', {});
     if (info && info.result && info.result.url)
       info.result.url = String(info.result.url).replace(/\?s=.*$/, '?s=***');
-    return jsonResponse({ status: 'ok', data: info });
+    return jsonResponse({ status: 'ok', data: info,
+      lastError: PropertiesService.getScriptProperties().getProperty('TG_LASTERR') || '' });
   }
 
   if (action === 'getReceipts') {
@@ -910,11 +911,12 @@ function tgHandle_(u) {
       try {
         const r = tgParseReceipt_(tgOcr_(blob));
         if (r) { st0.ocrSum = r.sum; st0.ocrTime = r.time || ''; }
-      } catch (err) { Logger.log('распознать не вышло: ' + err); }
+        else tgLastErr_('в распознанном тексте не нашлось суммы');
+      } catch (err) { tgLastErr_(String(err)); }
     }
     const seen = st0.ocrSum ? 'Чек принял: перевод ' + tgMoney_(st0.ocrSum) + ' ₸' +
                               (st0.ocrTime ? ', ' + st0.ocrTime : '') + '.'
-                            : 'Чек принял.';
+                            : 'Чек принял, но сумму в нём прочитать не вышло.';
 
     // Быстрый путь: всё написано подписью к чеку — «4850 2550 wolt»
     const cap = tgCaption_(m.caption);
@@ -1022,6 +1024,14 @@ function tgMismatch_(st) {
   if (Math.round(st.ocrSum) === Math.round(st.sum)) return '';
   return '\n\n⚠️ В чеке ' + tgMoney_(st.ocrSum) + ' ₸, а записано ' + tgMoney_(st.sum) +
          ' ₸. Проверьте: если ошиблись, пришлите чек заново.';
+}
+
+// Последняя ошибка распознавания — чтобы её можно было посмотреть снаружи
+function tgLastErr_(s) {
+  try {
+    PropertiesService.getScriptProperties().setProperty(
+      'TG_LASTERR', Utilities.formatDate(new Date(), 'Asia/Almaty', 'HH:mm:ss') + ' ' + String(s).slice(0, 400));
+  } catch (e) {}
 }
 
 function tgMoney_(n) {
@@ -1165,16 +1175,22 @@ function tgPoll() {
   if (!lock.tryLock(1000)) return;          // предыдущий проход ещё идёт
   try {
     const p = PropertiesService.getScriptProperties();
-    const until = Date.now() + 50000;
+    const cache = CacheService.getScriptCache();
+    // Окно короче минуты, иначе соседние запуски наезжают друг на друга
+    const until = Date.now() + 30000;
     while (Date.now() < until) {
       const offset = Number(p.getProperty('TG_OFFSET') || 0);
-      const r = tgApi_('getUpdates', { offset: offset, timeout: 20, allowed_updates: ['message'] });
+      const r = tgApi_('getUpdates', { offset: offset, timeout: 10, allowed_updates: ['message'] });
       if (!r || !r.ok) { Logger.log('getUpdates: ' + JSON.stringify(r)); break; }
       const ups = r.result || [];
       for (let i = 0; i < ups.length; i++) {
-        p.setProperty('TG_OFFSET', String(ups[i].update_id + 1));
-        try { tgHandle_(ups[i]); }
-        catch (e) { Logger.log('обновление ' + ups[i].update_id + ': ' + e); }
+        const u = ups[i];
+        p.setProperty('TG_OFFSET', String(u.update_id + 1));
+        const key = 'tgu_' + u.update_id;
+        if (cache.get(key)) { Logger.log('повтор ' + u.update_id); continue; }
+        cache.put(key, '1', 3600);
+        try { tgHandle_(u); }
+        catch (e) { Logger.log('обновление ' + u.update_id + ': ' + e); }
       }
     }
   } finally {
