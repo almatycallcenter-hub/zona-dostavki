@@ -907,7 +907,7 @@ function tgHandle_(u) {
     try { blob = tgFetchBlob_(st0); } catch (err) { Logger.log('файл не скачался: ' + err); }
     if (blob) {
       try { st0.link = tgSaveFile_(st0, blob.copyBlob()); }
-      catch (err) { Logger.log('на Диск не легло: ' + err); }
+      catch (err) { tgLastErr_('на Диск не легло: ' + err); }
       try {
         const r = tgParseReceipt_(tgOcr_(blob));
         if (r) { st0.ocrSum = r.sum; st0.ocrTime = r.time || ''; }
@@ -1137,11 +1137,14 @@ function tgSaveRow_(chat, st, link) {
   const sheet = getOrCreateSheet(SHEET_RECEIPTS, headers);
   const tz = SpreadsheetApp.openById(SHEET_ID).getSpreadsheetTimeZone();
   const now = new Date();
+  const cell = /^https?:\/\//.test(String(link))
+    ? '=HYPERLINK("' + String(link).replace(/"/g, '') + '";"открыть")'
+    : String(link || '').replace(/[="']/g, ' ').slice(0, 200);
   sheet.appendRow([
     "'" + Utilities.formatDate(now, tz, 'yyyy-MM-dd'),
-    Utilities.formatDate(now, tz, 'HH:mm'),
+    "'" + Utilities.formatDate(now, tz, 'HH:mm'),
     "'" + st.order, st.sum, st.osum || '', st.service, st.who,
-    link ? '=HYPERLINK("' + link + '";"открыть")' : '', String(chat)
+    cell, String(chat)
   ]);
 }
 
