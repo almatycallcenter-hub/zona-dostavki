@@ -902,27 +902,44 @@ function tgHandle_(u) {
   if (fileId) {
     const st0 = { fileId: fileId, fname: (m.document && m.document.file_name) || '',
                   who: who, at: new Date().toISOString() };
+    let blob = null;
+    try { blob = tgFetchBlob_(st0); } catch (err) { Logger.log('файл не скачался: ' + err); }
+    if (blob) {
+      try { st0.link = tgSaveFile_(st0, blob.copyBlob()); }
+      catch (err) { Logger.log('на Диск не легло: ' + err); }
+      try {
+        const r = tgParseReceipt_(tgOcr_(blob));
+        if (r) { st0.ocrSum = r.sum; st0.ocrTime = r.time || ''; }
+      } catch (err) { Logger.log('распознать не вышло: ' + err); }
+    }
+    const seen = st0.ocrSum ? 'Чек принял: перевод ' + tgMoney_(st0.ocrSum) + ' ₸' +
+                              (st0.ocrTime ? ', ' + st0.ocrTime : '') + '.'
+                            : 'Чек принял.';
+
     // Быстрый путь: всё написано подписью к чеку — «4850 2550 wolt»
     const cap = tgCaption_(m.caption);
     if (cap && cap.service) {
       st0.order = cap.order; st0.sum = cap.sum;
       st0.osum = cap.osum; st0.service = cap.service;
-      let link0 = '';
-      try { link0 = tgSaveFile_(st0); } catch (err) { link0 = 'ошибка: ' + err.message; }
-      tgSaveRow_(chat, st0, link0);
+      tgRename_(st0);
+      tgSaveRow_(chat, st0, st0.link || '');
       tgState_(chat, null);
       tgSend_(chat, 'Записала.\n№ ' + st0.order + ' · курьеру ' + tgMoney_(st0.sum) + ' ₸' +
-              (st0.osum ? ' · заказ ' + tgMoney_(st0.osum) + ' ₸' : '') + ' · ' + st0.service);
+              (st0.osum ? ' · заказ ' + tgMoney_(st0.osum) + ' ₸' : '') + ' · ' + st0.service +
+              tgMismatch_(st0));
       return;
     }
-    if (cap) { st0.order = cap.order; st0.sum = cap.sum; st0.osum = cap.osum; st0.step = 'service';
-               tgState_(chat, st0);
-               tgSend_(chat, 'Чек принял: № ' + cap.order + ', курьеру ' + tgMoney_(cap.sum) +
-                             ' ₸.\nЧерез кого отправили?', TG_SERVICES);
-               return; }
+    if (cap) {
+      st0.order = cap.order; st0.sum = cap.sum; st0.osum = cap.osum; st0.step = 'service';
+      tgState_(chat, st0);
+      tgSend_(chat, 'Чек принял: № ' + cap.order + ', курьеру ' + tgMoney_(cap.sum) + ' ₸.' +
+                    tgMismatch_(st0) + '\nЧерез кого отправили?', TG_SERVICES);
+      return;
+    }
+    if (st0.ocrSum) st0.sum = st0.ocrSum;   // сумму взяли из чека, спрашивать нечего
     st0.step = 'order';
     tgState_(chat, st0);
-    tgSend_(chat, 'Чек принял. Номер заказа? (только цифры)');
+    tgSend_(chat, seen + ' Номер заказа? (только цифры)');
     return;
   }
 
@@ -935,7 +952,13 @@ function tgHandle_(u) {
   if (st.step === 'order') {
     const num = text.replace(/\D/g, '');
     if (!num) { tgSend_(chat, 'Нужен номер заказа цифрами, например 4850.'); return; }
-    st.order = num; st.step = 'sum'; tgState_(chat, st);
+    st.order = num;
+    if (st.sum) {                       // сумма уже прочитана из чека
+      st.step = 'osum'; tgState_(chat, st);
+      tgSend_(chat, 'Сумма самого заказа, тенге? Если не знаете — напишите 0.');
+      return;
+    }
+    st.step = 'sum'; tgState_(chat, st);
     tgSend_(chat, 'Сколько перевели курьеру, тенге?');
     return;
   }
@@ -957,12 +980,14 @@ function tgHandle_(u) {
 
   if (st.step === 'service') {
     st.service = text;
-    let link = '';
-    try { link = tgSaveFile_(st); } catch (err) { link = 'ошибка: ' + err.message; }
+    let link = st.link || '';
+    if (!link) { try { link = tgSaveFile_(st); } catch (err) { link = 'ошибка: ' + err.message; } }
+    tgRename_(st);
     tgSaveRow_(chat, st, link);
     tgState_(chat, null);
     tgSend_(chat, 'Записала.\n№ ' + st.order + ' · курьеру ' + tgMoney_(st.sum) + ' ₸' +
             (st.osum ? ' · заказ ' + tgMoney_(st.osum) + ' ₸' : '') + ' · ' + st.service +
+            tgMismatch_(st) +
             '\n\nСледующий чек — просто пришлите файл.');
     return;
   }
@@ -991,23 +1016,109 @@ function tgCaption_(s) {
   return { order: order, sum: sum, osum: osum, service: service };
 }
 
+// Оператор написал одну сумму, а в чеке другая — молчать об этом нельзя
+function tgMismatch_(st) {
+  if (!st.ocrSum || !st.sum) return '';
+  if (Math.round(st.ocrSum) === Math.round(st.sum)) return '';
+  return '\n\n⚠️ В чеке ' + tgMoney_(st.ocrSum) + ' ₸, а записано ' + tgMoney_(st.sum) +
+         ' ₸. Проверьте: если ошиблись, пришлите чек заново.';
+}
+
 function tgMoney_(n) {
   return Number(n).toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 }
 
-function tgSaveFile_(st) {
+// Забираем файл у Телеграма один раз: он нужен и для Диска, и для распознавания
+function tgFetchBlob_(st) {
   const c = tgCfg_();
   const info = tgApi_('getFile', { file_id: st.fileId });
   if (!info.ok) throw new Error('файл не отдался');
-  const path = info.result.file_path;
-  const blob = UrlFetchApp.fetch('https://api.telegram.org/file/bot' + c.token + '/' + path).getBlob();
+  st.path = info.result.file_path;
+  return UrlFetchApp.fetch('https://api.telegram.org/file/bot' + c.token + '/' + st.path).getBlob();
+}
+
+function tgFolder_() {
   const parents = DriveApp.getFileById(SHEET_ID).getParents();
   const root = parents.hasNext() ? parents.next() : DriveApp.getRootFolder();
   const it = root.getFoldersByName('Чеки курьерам');
-  const folder = it.hasNext() ? it.next() : root.createFolder('Чеки курьерам');
-  const ext = (path.match(/\.[a-z0-9]+$/i) || ['.jpg'])[0];
-  blob.setName('Заказ ' + st.order + ' — ' + tgMoney_(st.sum) + ' тг' + ext);
-  return folder.createFile(blob).getUrl();
+  return it.hasNext() ? it.next() : root.createFolder('Чеки курьерам');
+}
+
+function tgSaveFile_(st, blob) {
+  const b = blob || tgFetchBlob_(st);
+  const ext = (String(st.path || '').match(/\.[a-z0-9]+$/i) || ['.jpg'])[0];
+  b.setName('Чек ' + Utilities.formatDate(new Date(), 'Asia/Almaty', 'yyyy-MM-dd HH-mm-ss') + ext);
+  const f = tgFolder_().createFile(b);
+  st.driveId = f.getId();
+  st.ext = ext;
+  return f.getUrl();
+}
+
+// Номер заказа становится известен уже после загрузки файла — переименуем
+function tgRename_(st) {
+  if (!st.driveId) return;
+  try {
+    DriveApp.getFileById(st.driveId)
+      .setName('Заказ ' + st.order + ' — ' + tgMoney_(st.sum) + ' тг' + (st.ext || ''));
+  } catch (e) { Logger.log('переименовать не вышло: ' + e); }
+}
+
+// ── Распознавание чека ──────────────────────────────────────
+// Диск умеет вытащить текст из PDF и с фотографии. Грузим копию как
+// документ Google, забираем текст, копию убираем в корзину.
+function tgOcr_(blob) {
+  const token = ScriptApp.getOAuthToken();
+  const bnd = 'tapptatti' + Date.now();
+  const head = '--' + bnd + '\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n' +
+               JSON.stringify({ name: 'распознавание чека', mimeType: 'application/vnd.google-apps.document' }) +
+               '\r\n--' + bnd + '\r\nContent-Type: ' + (blob.getContentType() || 'application/pdf') + '\r\n\r\n';
+  const tail = '\r\n--' + bnd + '--';
+  const bytes = Utilities.newBlob(head).getBytes()
+                  .concat(blob.getBytes())
+                  .concat(Utilities.newBlob(tail).getBytes());
+  const up = UrlFetchApp.fetch(
+    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&ocrLanguage=ru&supportsAllDrives=true', {
+      method: 'post', contentType: 'multipart/related; boundary=' + bnd,
+      payload: bytes, headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true });
+  const j = JSON.parse(up.getContentText() || '{}');
+  if (!j.id) throw new Error('Диск не принял файл: ' + up.getContentText().slice(0, 150));
+  let text = '';
+  try {
+    const ex = UrlFetchApp.fetch(
+      'https://www.googleapis.com/drive/v3/files/' + j.id + '/export?mimeType=text/plain',
+      { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true });
+    text = ex.getContentText();
+  } finally {
+    try {
+      UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/files/' + j.id, {
+        method: 'patch', contentType: 'application/json', payload: JSON.stringify({ trashed: true }),
+        headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true });
+    } catch (e) {}
+  }
+  return text;
+}
+
+// Из распознанного текста достаём сумму перевода и время
+function tgParseReceipt_(text) {
+  const t = String(text || '').replace(/\u00a0/g, ' ');
+  if (!t.trim()) return null;
+  const out = {};
+  const nums = [];
+  const re = /(\d[\d  ]*(?:[.,]\d{2})?)\s*(?:₸|тг\b|KZT|T\b)/gi;
+  let m;
+  while ((m = re.exec(t))) {
+    const v = Number(String(m[1]).replace(/[\s ]/g, '').replace(',', '.'));
+    if (v > 0) nums.push({ v: v, at: m.index });
+  }
+  if (nums.length) {
+    // В чеке Kaspi сумма перевода стоит первой и она же самая крупная
+    const done = t.search(/соверш|орындал|успешн/i);
+    const after = done >= 0 ? nums.filter(function (x) { return x.at > done; }) : [];
+    out.sum = (after.length ? after : nums).reduce(function (a, b) { return b.v > a.v ? b : a; }).v;
+  }
+  const tm = t.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
+  if (tm) out.time = ('0' + tm[1]).slice(-2) + ':' + tm[2];
+  return out.sum ? out : null;
 }
 
 function tgSaveRow_(chat, st, link) {
