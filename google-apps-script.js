@@ -918,12 +918,13 @@ function tgHandle_(u) {
       catch (err) { tgLastErr_('на Диск не легло: ' + err); }
       try {
         const r = tgParseReceipt_(tgOcr_(blob));
-        if (r) { st0.ocrSum = r.sum; st0.ocrTime = r.time || ''; }
+        if (r) { st0.ocrSum = r.sum; st0.ocrTime = r.time || ''; st0.ocrDate = r.date || ''; }
         else tgLastErr_('в распознанном тексте не нашлось суммы');
       } catch (err) { tgLastErr_(String(err)); }
     }
+    const when = [st0.ocrDate ? tgRuDate_(st0.ocrDate) : '', st0.ocrTime || ''].filter(String).join(' ');
     const seen = st0.ocrSum ? 'Чек принял: перевод ' + tgMoney_(st0.ocrSum) + ' ₸' +
-                              (st0.ocrTime ? ', ' + st0.ocrTime : '') + '.'
+                              (when ? ', ' + when : '') + '.'
                             : 'Чек принял, но сумму в нём прочитать не вышло.';
 
     // Быстрый путь: всё написано подписью к чеку — «4850 2550 wolt»
@@ -1042,6 +1043,11 @@ function tgLastErr_(s) {
   } catch (e) {}
 }
 
+function tgRuDate_(iso) {
+  const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? m[3] + '.' + m[2] + '.' + m[1] : '';
+}
+
 function tgMoney_(n) {
   return Number(n).toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 }
@@ -1136,24 +1142,61 @@ function tgParseReceipt_(text) {
   }
   const tm = t.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
   if (tm) out.time = ('0' + tm[1]).slice(-2) + ':' + tm[2];
+  out.date = tgParseDate_(t);
   return out.sum ? out : null;
 }
 
+const TG_MONTHS = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+
+// Дата перевода. В чеке Kaspi она бывает и цифрами (09.11.26),
+// и словами (9 ноября 2026 г.) — понимаем оба вида.
+function tgParseDate_(t) {
+  const now = new Date();
+  const iso = function (y, m, d) {
+    if (y < 100) y += 2000;
+    if (m < 1 || m > 12 || d < 1 || d > 31) return '';
+    return y + '-' + ('0' + m).slice(-2) + '-' + ('0' + d).slice(-2);
+  };
+  let m = t.match(/\b(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{2,4})\b/);
+  if (m) return iso(Number(m[3]), Number(m[2]), Number(m[1]));
+  m = t.match(/\b(\d{1,2})\s+([А-Яа-яЁё]{3,})\s*(\d{4})?/);
+  if (m) {
+    const k = m[2].toLowerCase().slice(0, 3);
+    const mi = TG_MONTHS.indexOf(k === 'май' ? 'мая' : k);
+    if (mi >= 0) return iso(Number(m[3] || now.getFullYear()), mi + 1, Number(m[1]));
+  }
+  return '';
+}
+
 function tgSaveRow_(chat, st, link) {
-  const headers = ['Дата', 'Время', '№ заказа', 'Сумма курьеру, ₸', 'Сумма заказа, ₸',
+  const headers = ['Дата', 'Время', 'Дата перевода', 'Время перевода', '№ заказа',
+                   'Сумма курьеру, ₸', 'Сумма заказа, ₸',
                    'Служба', 'Кто прислал', 'Чек', 'Чат'];
   const sheet = getOrCreateSheet(SHEET_RECEIPTS, headers);
+  // Лист мог появиться раньше этих колонок — дописываем их на место
+  ensureColumn(sheet, 'Дата перевода', 2);
+  ensureColumn(sheet, 'Время перевода', 3);
   const tz = SpreadsheetApp.openById(SHEET_ID).getSpreadsheetTimeZone();
   const now = new Date();
   const cell = /^https?:\/\//.test(String(link))
     ? '=HYPERLINK("' + String(link).replace(/"/g, '') + '";"открыть")'
     : String(link || '').replace(/[="']/g, ' ').slice(0, 200);
-  sheet.appendRow([
-    "'" + Utilities.formatDate(now, tz, 'yyyy-MM-dd'),
-    "'" + Utilities.formatDate(now, tz, 'HH:mm'),
-    "'" + st.order, st.sum, st.osum || '', st.service, st.who,
-    cell, String(chat)
-  ]);
+  const val = {
+    'Дата':              "'" + Utilities.formatDate(now, tz, 'yyyy-MM-dd'),
+    'Время':             "'" + Utilities.formatDate(now, tz, 'HH:mm'),
+    'Дата перевода':     st.ocrDate ? "'" + st.ocrDate : '',
+    'Время перевода':    st.ocrTime ? "'" + st.ocrTime : '',
+    '№ заказа':          "'" + st.order,
+    'Сумма курьеру, ₸':  st.sum,
+    'Сумма заказа, ₸':   st.osum || '',
+    'Служба':            st.service,
+    'Кто прислал':       st.who,
+    'Чек':               cell,
+    'Чат':               String(chat)
+  };
+  // Пишем по названиям колонок, а не по счёту: порядок в листе мог поменяться
+  const head = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
+  sheet.appendRow(head.map(function (h) { return h in val ? val[h] : ''; }));
 }
 
 // Отдаём чеки в тул: он сверит их с отчётом 0080

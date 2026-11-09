@@ -5331,8 +5331,10 @@ async function rcLoad() {
     if (j.status !== 'ok') throw new Error(j.message || 'таблица ответила ошибкой');
     const un = s => String(s == null ? '' : s).replace(/^'/, '').trim();
     rcRows = (j.data || []).map(x => ({
-      date:    un(x['Дата']),
-      time:    un(x['Время']),
+      // Для сверки важна дата самого перевода, а не момента, когда чек прислали
+      date:    un(x['Дата перевода']) || un(x['Дата']),
+      time:    un(x['Время перевода']) || un(x['Время']),
+      sentAt:  un(x['Дата']) + ' ' + un(x['Время']),
       num:     un(x['№ заказа']),
       toCour:  numOrZero(x['Сумма курьеру, ₸']),
       orderSum:numOrZero(x['Сумма заказа, ₸']),
