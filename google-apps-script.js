@@ -22,6 +22,14 @@ const SHEET_RECEIPTS     = 'Чеки курьерам';
 // ════════════════════════════════════════════════════════════
 //  GET — получение данных (история смен)
 // ════════════════════════════════════════════════════════════
+// Сообщение человеку. Из меню таблицы — окном, из редактора — в журнал:
+// SpreadsheetApp.getUi() в редакторе недоступен и роняет функцию.
+function tell_(msg) {
+  Logger.log(msg);
+  try { SpreadsheetApp.getUi().alert(msg); } catch (e) {}
+  return msg;
+}
+
 function doGet(e) {
   const action = e.parameter.action || '';
 
@@ -106,7 +114,7 @@ function doPost(e) {
 // новый доступ. Запустите эту функцию один раз и разрешите доступ к Диску.
 function authorizeDrive() {
   const n = DriveApp.getRootFolder().getName();
-  SpreadsheetApp.getUi().alert('Доступ к Диску есть. Корневая папка: ' + n);
+  tell_('Доступ к Диску есть. Корневая папка: ' + n);
 }
 
 function saveShot(data) {
@@ -463,7 +471,7 @@ function getProducts() {
 function initCatalogSheet() {
   const ss = SpreadsheetApp.openById(SHEET_ID);
   let sheet = ss.getSheetByName('Каталог');
-  if (sheet) { SpreadsheetApp.getUi().alert('Лист «Каталог» уже существует.'); return; }
+  if (sheet) { tell_('Лист «Каталог» уже существует.'); return; }
 
   sheet = ss.insertSheet('Каталог');
   const headers = ['Атауы (название)', 'Категория', 'Салмақ (вес)', 'Өлшемдер JSON', 'Құрамы (состав)', 'Сипаттамасы (описание)', 'Сақтау (срок хранения)', 'Белсенді (TRUE/FALSE)'];
@@ -477,7 +485,7 @@ function initCatalogSheet() {
   sheet.setColumnWidth(5, 300);
   sheet.setColumnWidth(6, 300);
   sheet.setColumnWidth(7, 200);
-  SpreadsheetApp.getUi().alert('Лист «Каталог» создан! Теперь запустите функцию fillCatalogFromCode чтобы заполнить его текущими продуктами.');
+  tell_('Лист «Каталог» создан! Теперь запустите функцию fillCatalogFromCode чтобы заполнить его текущими продуктами.');
 }
 
 // ════════════════════════════════════════════════════════════
@@ -683,7 +691,7 @@ function fillCatalogFromCode() {
   ];
 
   sheet.getRange(2, 1, rows.length, 8).setValues(rows);
-  SpreadsheetApp.getUi().alert('Готово! Заполнено ' + rows.length + ' продуктов в лист «Каталог».');
+  tell_('Готово! Заполнено ' + rows.length + ' продуктов в лист «Каталог».');
 }
 
 // ════════════════════════════════════════════════════════════
@@ -768,7 +776,7 @@ function shiftAllDatesForward() {
   shiftSheet(SHEET_SHIFTS,       ['Дата']);
   shiftSheet(SHEET_TRANSACTIONS, ['Дата', 'Дата заказа']);
 
-  SpreadsheetApp.getUi().alert('Готово! Все даты сдвинуты на +1 день.');
+  tell_('Готово! Все даты сдвинуты на +1 день.');
 }
 
 // ════════════════════════════════════════════════════════════
@@ -808,7 +816,7 @@ function shiftAllDatesBackward() {
   shiftSheet(SHEET_SHIFTS,       ['Дата']);
   shiftSheet(SHEET_TRANSACTIONS, ['Дата', 'Дата заказа']);
 
-  SpreadsheetApp.getUi().alert('Готово! Все даты сдвинуты на -1 день.');
+  tell_('Готово! Все даты сдвинуты на -1 день.');
 }
 
 
@@ -1218,15 +1226,15 @@ function tgUsePolling() {
 function tgSetWebhook() {
   const c = tgCfg_();
   if (!c.token || !c.secret || !c.url) {
-    SpreadsheetApp.getUi().alert('Заполните TG_TOKEN, TG_SECRET и TG_EXEC_URL в свойствах скрипта.');
+    tell_('Заполните TG_TOKEN, TG_SECRET и TG_EXEC_URL в свойствах скрипта.');
     return;
   }
   const r = tgApi_('setWebhook', { url: c.url + '?s=' + encodeURIComponent(c.secret),
                                    allowed_updates: ['message'] });
-  SpreadsheetApp.getUi().alert(r.ok ? 'Вебхук подключён.' : 'Не вышло: ' + JSON.stringify(r));
+  tell_(r.ok ? 'Вебхук подключён.' : 'Не вышло: ' + JSON.stringify(r));
 }
 
 function tgDeleteWebhook() {
   const r = tgApi_('deleteWebhook', {});
-  SpreadsheetApp.getUi().alert(r.ok ? 'Вебхук снят.' : JSON.stringify(r));
+  tell_(r.ok ? 'Вебхук снят.' : JSON.stringify(r));
 }
