@@ -847,7 +847,25 @@ function tgState_(chat, val) {
   return val;
 }
 
+// Apps Script отвечает Телеграму редиректом, и тот считает доставку неудачной:
+// одно и то же сообщение приходит по нескольку раз. Поэтому каждое обновление
+// обрабатываем ровно один раз — по его update_id, под замком.
 function tgUpdate_(u) {
+  if (!u || !u.update_id) return;
+  const lock = LockService.getScriptLock();
+  try { lock.waitLock(20000); } catch (e) { return; }
+  try {
+    const cache = CacheService.getScriptCache();
+    const key = 'tgu_' + u.update_id;
+    if (cache.get(key)) return;          // это повтор — молчим
+    cache.put(key, '1', 3600);
+    tgHandle_(u);
+  } finally {
+    try { lock.releaseLock(); } catch (e) {}
+  }
+}
+
+function tgHandle_(u) {
   const m = u.message || u.edited_message;
   if (!m) return;
   const chat = m.chat.id, cfg = tgCfg_();
