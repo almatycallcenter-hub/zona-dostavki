@@ -1562,6 +1562,11 @@ const dlDay = s => {
   return d.toISOString().slice(0, 10);
 };
 
+// Перезагрузка мимо кэша: новый адрес браузер не может взять из памяти
+function dlFresh() {
+  location.replace(location.pathname + '?v=' + Date.now() + location.hash);
+}
+
 async function dlLoad(force) {
   const url = ls('scriptUrl');
   const out = document.getElementById('dlOut');
@@ -1653,8 +1658,15 @@ function renderDelivery() {
 
   if (dlErr) {
     bdg.className = 'badge br'; bdg.textContent = 'Ошибка';
+    // Ошибка в самом коде страницы означает, что браузер держит старую
+    // версию файла: GitHub Pages разрешает хранить её десять минут.
+    // Кнопка перезагружает страницу мимо кэша, а не просто повторяет запрос.
+    const stale = /before initialization|is not defined|is not a function|Unexpected token/i.test(dlErr);
     out.innerHTML = `<div class="status-box s-err"><div class="s-icon">❌</div>
-      <div><div class="s-title">${dlErr}</div></div></div>`;
+      <div><div class="s-title">${dlErr}</div>
+      ${stale ? `<div class="s-sub">Похоже, браузер показывает старую версию страницы.</div>
+      <button class="btn" style="margin-top:8px;" onclick="dlFresh()">Загрузить свежую версию</button>` : ''}
+      </div></div>`;
     return;
   }
   if (!dlLoaded) {
@@ -1800,8 +1812,11 @@ function renderDelivery() {
     const ordByPhone = {};
     O.forEach(o => { const k = phOf(o.phone); if (k) (ordByPhone[k] = ordByPhone[k] || []).push(o); });
 
+    // Доставка ещё не состоялась: в счёт за месяц попадёт позже
+    const isPend = w => /заплан|в пути|назнач|ожид|создан|курьер едет/i.test(w.status || '');
     const wCanc = dlWolt.filter(isCanc);
     const wOk   = dlWolt.filter(w => !isCanc(w));
+    const wPend = wOk.filter(isPend);
     const wCorp = wOk.filter(isCorp);
     const wCli  = wOk.filter(w => !isCorp(w));
     const sumOf = a => a.reduce((s, w) => s + w.cost, 0);
@@ -1855,6 +1870,11 @@ function renderDelivery() {
           <div class="kpi-val">${linked.length} из ${wCli.length}</div>
           <div class="kpi-sub">по телефону клиента</div></div>
       </div>`;
+
+    if (wPend.length) html += `<div style="font-size:11.5px;color:var(--text3);margin-top:8px;">
+      Из них ещё не доставлено: ${plural(wPend.length, 'доставка', 'доставки', 'доставок')} на ${
+      dlMoney(wPend.reduce((s, w) => s + w.cost, 0))} — статус «${wPend[0].status}».
+      В счёт за месяц они попадут, когда закроются.</div>`;
 
     if (retry.length) html += `<div class="status-box s-warn" style="margin-top:12px;">
       <div class="s-icon">🔁</div><div>
