@@ -1807,7 +1807,12 @@ function renderDelivery() {
   // ── Wolt Drive: что он сам показывает ──
   if (dlWolt.length) {
     const isCanc = w => /отклон|отмен|не удал/i.test(w.status || '');
-    const isCorp = w => /тәп|тəп|тэп|тап[\s-]?тат|tap[\s-]?tat/i.test(w.who || '');
+    // Служебный рейс: везут не клиенту, а на свою точку или сотруднику.
+    // Определяем по получателю — в Wolt там пишут «Тəп-Тəтті, 4мкр 28/1»,
+    // «Диспетчер», «Офис», название филиала. Такие рейсы нельзя считать
+    // расходом на доставку клиентам: это внутренняя логистика.
+    const isCorp = w => /тәп|тəп|тэп|тап[\s-]?тат|tap[\s-]?tat|диспетчер|офис|склад|цех|алма\s*сити|alma\s*city|alem\s*city/i
+      .test(w.who || '');
     const phOf = s => String(s || '').replace(/\D/g, '').slice(-10);
     const ordByPhone = {};
     O.forEach(o => { const k = phOf(o.phone); if (k) (ordByPhone[k] = ordByPhone[k] || []).push(o); });
@@ -1838,13 +1843,25 @@ function renderDelivery() {
     const under = gap.filter(x => x.d > 0);
 
     // Повторные попытки: один адрес и телефон в один день несколько раз
-    // Группируем по адресу, а не по телефону: в Wolt телефон бывает с опечаткой
+    // Группируем по адресу, а не по телефону: в Wolt телефон бывает с опечаткой.
+    // Служебные рейсы сюда не берём: на свою точку за день ездят по нескольку
+    // раз, и это не повторная попытка, а обычный развоз.
     const tries = {};
-    dlWolt.forEach(w => {
+    dlWolt.filter(w => !isCorp(w)).forEach(w => {
       const k = w.date + '|' + String(w.to || w.phone).toLowerCase().replace(/[^a-zа-я0-9]+/g, '');
       (tries[k] = tries[k] || []).push(w);
     });
     const retry = Object.values(tries).filter(a => a.length > 1);
+
+    // Откуда забирают: видно, какие точки вообще гоняют Wolt
+    const byFrom = {};
+    dlWolt.forEach(w => {
+      const k = (w.from || '(не указано)').replace(/,\s*\d{6},?/, ',').replace(/,\s*Алматы$/, '');
+      (byFrom[k] = byFrom[k] || { k, n: 0, sum: 0, corp: 0, days: new Set() });
+      byFrom[k].n++; byFrom[k].sum += w.cost; byFrom[k].days.add(w.date);
+      if (isCorp(w)) byFrom[k].corp++;
+    });
+    const froms = Object.values(byFrom).sort((a, b) => b.sum - a.sum);
 
     // Заказы Wolt без доставки в списке — за те дни, что загружены
     const wDays = new Set(dlWolt.map(w => w.date));
@@ -1879,13 +1896,14 @@ function renderDelivery() {
     if (retry.length) html += `<div class="status-box s-warn" style="margin-top:12px;">
       <div class="s-icon">🔁</div><div>
         <div class="s-title">Повторные попытки по одному адресу: ${retry.length}</div>
-        <div class="s-sub">${retry.slice(0, 6).map(a =>
+        <div class="s-sub">${retry.slice(0, 8).map(a =>
           ruDate(a[0].date) + ' · ' + (a[0].who || a[0].to).slice(0, 26) + ' · ' +
-          plural(a.length, 'попытка', 'попытки', 'попыток') + ' по ' + dlMoney(a[0].cost) +
+          plural(a.length, 'попытка', 'попытки', 'попыток') + ' на ' +
+          dlMoney(a.reduce((s, w) => s + w.cost, 0)) +
           ' (' + a.map(w => w.status).join(', ') + ')').join('<br>')}
-          <br>Если Wolt берёт деньги за каждую, одна доставка обходится в ${
+          <br>Если Wolt берёт деньги за каждую, эти адреса обходятся в ${
           dlMoney(retry.reduce((s, a) => s + a.reduce((x, w) => x + w.cost, 0), 0))} вместо ${
-          dlMoney(retry.reduce((s, a) => s + a[0].cost, 0))}.</div>
+          dlMoney(retry.reduce((s, a) => s + Math.min(...a.map(w => w.cost)), 0))}.</div>
       </div></div>`;
 
     if (gap.length) html += `<div class="card" style="box-shadow:none;border:none;padding:0;margin:12px 0 0;">
@@ -1911,6 +1929,20 @@ function renderDelivery() {
         <div class="s-sub">${lost.slice(0, 8).map(w => ruDate(w.date) + ' · ' + (w.who || '—') + ' · ' +
           w.to.slice(0, 30) + ' · ' + dlMoney(w.cost) + (w.many ? ' · несколько заказов на этот телефон' : '')).join('<br>')}
           ${lost.length > 8 ? '<br>…и ещё ' + (lost.length - 8) : ''}</div></div></div>`;
+
+    if (froms.length > 1) html += `<div class="card" style="box-shadow:none;border:none;padding:0;margin:14px 0 0;">
+      <div style="font-size:13px;font-weight:700;margin-bottom:6px;">Откуда забирают</div>` +
+      dlTable(
+        [{t:'Точка'},{t:'Рейсов',r:1},{t:'Из них служебных',r:1},{t:'Дней',r:1},{t:'Сумма',r:1}],
+        froms.map(f => ({ cells: [
+          f.k, String(f.n), f.corp ? String(f.corp) : '—', String(f.days.size), dlMoney(f.sum)
+        ] })),
+        ['Итого', String(dlWolt.length), String(froms.reduce((s, f) => s + f.corp, 0)), '',
+         dlMoney(sumOf(dlWolt))]
+      ) +
+      `<div style="font-size:11px;color:var(--text3);margin-top:6px;">
+        Служебный рейс — тот, где получатель не клиент, а своя точка, диспетчер или офис.
+        Если в списке есть адрес, который не филиал, значит оттуда тоже вызывают Wolt.</div></div>`;
 
     if (noDrive.length) html += `<div class="status-box s-warn" style="margin-top:12px;">
       <div class="s-icon">❓</div><div>
