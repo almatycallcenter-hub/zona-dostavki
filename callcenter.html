@@ -1567,14 +1567,14 @@ async function dlLoad(force) {
     const j = await r.json();
     const jo = await ro.json();
     const jw = await rw.json();
+    if (j.status !== 'ok') throw new Error(j.message || 'таблица ответила ошибкой');
+    const un = s => String(s == null ? '' : s).replace(/^'/, '').trim();
     dlWolt = ((jw && jw.data) || []).map(x => ({
       id: un(x['ID']), date: un(x['Дата']), time: un(x['Время']),
       from: un(x['Откуда']), to: un(x['Куда']), who: un(x['Получатель']),
       phone: un(x['Телефон']).replace(/\D/g, '').slice(-10),
       cost: numOrZero(x['Стоимость, ₸']), status: un(x['Статус'])
     })).filter(w => w.id);
-    if (j.status !== 'ok') throw new Error(j.message || 'таблица ответила ошибкой');
-    const un = s => String(s == null ? '' : s).replace(/^'/, '').trim();
     dlOrders = ((jo && jo.data) || []).map(x => {
       const sum = numOrZero(x['Сумма, ₸']), dv = numOrZero(x['Доставка, ₸']);
       return {
