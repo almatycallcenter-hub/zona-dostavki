@@ -1387,7 +1387,7 @@ function go(id) {
 //  Доля считается только по доставкам, у которых есть И расход,
 //  И сумма заказа — иначе числитель шире знаменателя.
 // ══════════════════════════════════════════════════
-let dlRows = [], dlLoaded = false, dlErr = '';
+let dlRows = [], dlOrders = [], dlLoaded = false, dlErr = '';
 
 const dlMoney = n => Number(n || 0).toLocaleString('ru-RU',
                       { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₸';
@@ -1429,10 +1429,25 @@ async function dlLoad(force) {
   }
   out.innerHTML = '<div style="text-align:center;padding:28px;color:var(--text3);">⏳ Считаем…</div>';
   try {
-    const r = await fetch(url + '?action=getReceipts');
+    const [r, ro] = await Promise.all([
+      fetch(url + '?action=getReceipts'),
+      fetch(url + '?action=getOrders')
+    ]);
     const j = await r.json();
+    const jo = await ro.json();
     if (j.status !== 'ok') throw new Error(j.message || 'таблица ответила ошибкой');
     const un = s => String(s == null ? '' : s).replace(/^'/, '').trim();
+    dlOrders = ((jo && jo.data) || []).map(x => {
+      const sum = numOrZero(x['Сумма, ₸']), dv = numOrZero(x['Доставка, ₸']);
+      return {
+        num: un(x['Номер']), date: un(x['Учетный день']),
+        oper: un(x['Оператор']), courier: un(x['Курьер']),
+        dtype: un(x['Тип доставки']), client: un(x['Клиент']),
+        addr: un(x['Адрес']), comment: un(x['Комментарий']),
+        sum, deliv: dv, goods: sum - dv,
+        pickup: /самовывоз/i.test(un(x['Тип доставки']) + ' ' + un(x['Курьер']))
+      };
+    }).filter(o => o.num);
     dlRows = (j.data || []).map(x => ({
       date:  un(x['Дата перевода']) || un(x['Дата']),
       sum:   numOrZero(x['Сумма курьеру, ₸']),
@@ -1490,140 +1505,184 @@ function renderDelivery() {
     out.innerHTML = '<div style="text-align:center;padding:28px;color:var(--text3);">⏳ Считаем…</div>';
     return;
   }
-  if (!dlRows.length) {
+  if (!dlRows.length && !dlOrders.length) {
     bdg.className = 'badge by'; bdg.textContent = 'Пусто';
     out.innerHTML = `<div class="status-box s-warn"><div class="s-icon">📋</div><div>
-      <div class="s-title">В листе «Чеки курьерам» пока нет ни одной строки</div>
-      <div class="s-sub">Отчёт появится, как только операторы пришлют первые чеки в бот.</div>
+      <div class="s-title">Данных пока нет</div>
+      <div class="s-sub">Загрузите отчёт 0080 в разделе «Касса» — заказы сохранятся сами.</div>
     </div></div>`;
     return;
   }
 
-  const R = dlRows;
-  const paired = R.filter(r => r.osum > 0);          // есть и расход, и сумма заказа
-  const sum   = R.reduce((a, b) => a + b.sum, 0);
-  const osum  = paired.reduce((a, b) => a + b.osum, 0);
-  const psum  = paired.reduce((a, b) => a + b.sum, 0);
-  const dates = R.map(r => r.date).filter(Boolean).sort();
-  const servN = R.filter(r => r.serv).length;
-  const brN   = R.filter(r => r.br).length;
-  const numN  = R.filter(r => r.num).length;
+  const R = dlRows;                                   // чеки курьерам
+  const O = dlOrders;                                 // доставки из 0080
+  const cour = O.filter(o => !o.pickup);              // курьером
+  const pick = O.filter(o => o.pickup);               // самовывоз
+  const sum  = R.reduce((a, b) => a + b.sum, 0);      // сколько отдали курьерам
+  const courSum = cour.reduce((a, b) => a + b.goods, 0);
+  const byNum = {}; O.forEach(o => { byNum[o.num] = o; });
+
+  // Чек обязателен там, где доставка бесплатная: её оплачивает компания
+  const needsR = o => !o.pickup && o.goods >= freeFrom(o.date);
+  const need = cour.filter(needsR);
+  const haveNum = {}; R.forEach(r => { if (r.num) haveNum[r.num] = true; });
+  const covered = need.filter(o => haveNum[o.num]);
+  const missing = need.filter(o => !haveNum[o.num]);
+  const withNum = R.filter(r => r.num);
+  const noNum   = R.filter(r => !r.num);
+  const orphan  = withNum.filter(r => !byNum[r.num]);
 
   bdg.className = 'badge bg';
-  bdg.textContent = plural(R.length, 'доставка', 'доставки', 'доставок');
+  bdg.textContent = plural(cour.length, 'доставка', 'доставки', 'доставок');
+
+  const dates = O.map(o => o.date).filter(Boolean).sort();
 
   let html = `<div class="card">
     <div class="kpi-row">
-      <div class="kpi"><div class="kpi-label">Расход на доставку</div>
+      <div class="kpi"><div class="kpi-label">Доставки курьером</div>
+        <div class="kpi-val">${cour.length}</div>
+        <div class="kpi-sub">из ${O.length} заказов · самовывоз ${pick.length}</div></div>
+      <div class="kpi"><div class="kpi-label">Сумма этих заказов</div>
+        <div class="kpi-val">${dlMoney(courSum)}</div>
+        <div class="kpi-sub">товары, без услуги доставки</div></div>
+      <div class="kpi g"><div class="kpi-label">Отдали курьерам</div>
         <div class="kpi-val">${dlMoney(sum)}</div>
-        <div class="kpi-sub">${plural(R.length, 'доставка', 'доставки', 'доставок')}</div></div>
-      <div class="kpi"><div class="kpi-label">Сумма заказов</div>
-        <div class="kpi-val">${dlMoney(osum)}</div>
-        <div class="kpi-sub">по ${paired.length} из ${R.length}</div></div>
-      <div class="kpi g"><div class="kpi-label">Доля доставки</div>
-        <div class="kpi-val">${dlPct(psum, osum)}</div>
-        <div class="kpi-sub">${dlMoney(psum)} ÷ ${dlMoney(osum)}</div></div>
-      <div class="kpi y"><div class="kpi-label">Средний расход</div>
-        <div class="kpi-val">${dlMoney(sum / R.length)}</div>
-        <div class="kpi-sub">на одну доставку</div></div>
+        <div class="kpi-sub">${plural(R.length, 'чек', 'чека', 'чеков')} и переносов</div></div>
+      <div class="kpi y"><div class="kpi-label">Доля доставки</div>
+        <div class="kpi-val">${dlPct(sum, courSum)}</div>
+        <div class="kpi-sub">от суммы курьерских заказов</div></div>
     </div>
     <div style="font-size:11.5px;color:var(--text3);margin-top:10px;">
-      Период ${dates.length ? dlFull(dates[0]) + ' — ' + dlFull(dates[dates.length - 1]) : '—'}.
-      Доля считается только по доставкам, где есть и расход, и сумма заказа:
-      иначе в числитель попадёт то, чего нет в знаменателе.
+      Заказы ${dates.length ? dlFull(dates[0]) + ' — ' + dlFull(dates[dates.length - 1]) : '—'} из отчёта 0080.
+      Самовывоз в расчёт доли не входит: курьера по нему не оплачивают.
     </div>
   </div>`;
 
-  // ── по месяцам ──
-  const byM = dlGroup(R, r => String(r.date || '').slice(0, 7)).sort((a, b) => a.k.localeCompare(b.k));
+  // ── по месяцам: заказы против чеков ──
+  const months = [...new Set(
+    O.map(o => o.date.slice(0, 7)).concat(R.map(r => r.date.slice(0, 7))).filter(Boolean)
+  )].sort();
+  const mRows = months.map(m => {
+    const oc = cour.filter(o => o.date.slice(0, 7) === m);
+    const rc = R.filter(r => r.date.slice(0, 7) === m);
+    const nd = oc.filter(needsR);
+    const cv = nd.filter(o => haveNum[o.num]).length;
+    const g2 = oc.reduce((a, b) => a + b.goods, 0);
+    const s2 = rc.reduce((a, b) => a + b.sum, 0);
+    return { m, n: oc.length, goods: g2, spent: s2, nd: nd.length, cv, rc: rc.length };
+  });
   html += `<div class="card"><div class="card-head"><div>
       <div class="card-title">📅 По месяцам</div>
       <div style="font-size:11px;color:var(--text3);margin-top:2px;">
-        доля падает, если растёт средний чек, а не если дешевеет курьер</div>
+        слева — что показывает 0080, справа — что подтверждено чеками</div>
     </div></div>` +
     dlTable(
-      [{t:'Месяц'},{t:'Доставок',r:1},{t:'Расход',r:1},{t:'Сумма заказов',r:1},
-       {t:'Доля',r:1},{t:'Ср. расход',r:1},{t:'Ср. заказ',r:1}],
-      byM.map(m => ({ cells: [
-        dlMonthTitle(m.k), m.n + (m.pn !== m.n ? ' (' + m.pn + ' с заказом)' : ''),
-        dlMoney(m.sum), m.pn ? dlMoney(m.osum) : '—',
-        m.pn ? dlPct(m.psum, m.osum) : 'не считается',
-        dlMoney(m.sum / m.n), m.pn ? dlMoney(m.osum / m.pn) : '—'
-      ], __dim: !m.pn })),
-      ['Итого', R.length + (paired.length !== R.length ? ' (' + paired.length + ' с заказом)' : ''),
-       dlMoney(sum), dlMoney(osum), dlPct(psum, osum), dlMoney(sum / R.length),
-       dlMoney(osum / paired.length)]
+      [{t:'Месяц'},{t:'Курьером',r:1},{t:'Сумма заказов',r:1},{t:'Отдали курьерам',r:1},
+       {t:'Доля',r:1},{t:'Нужен чек',r:1},{t:'Есть чек',r:1}],
+      mRows.map(x => ({ cells: [
+        dlMonthTitle(x.m), x.n, dlMoney(x.goods), dlMoney(x.spent),
+        x.goods > 0 ? dlPct(x.spent, x.goods) : '—',
+        x.nd, x.cv + (x.nd && x.cv < x.nd ? ' <span style="color:var(--red);">(−' + (x.nd - x.cv) + ')</span>' : '')
+      ], __dim: !x.n })),
+      ['Итого', cour.length, dlMoney(courSum), dlMoney(sum), dlPct(sum, courSum),
+       need.length, covered.length]
     ) + `</div>`;
 
-  // ── по службам ──
+  // ── сверка чеков с заказами ──
+  const okNum = withNum.filter(r => byNum[r.num]).length;
+  html += `<div class="card"><div class="card-head"><div>
+      <div class="card-title">🔗 Чеки против заказов</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:2px;">
+        сходятся по номеру заказа — без догадок по сумме и адресу</div>
+    </div></div>
+    <div class="kpi-row">
+      <div class="kpi g"><div class="kpi-label">Сошлись по номеру</div>
+        <div class="kpi-val">${okNum}</div>
+        <div class="kpi-sub">из ${R.length} чеков</div></div>
+      <div class="kpi ${missing.length ? 'r' : ''}"><div class="kpi-label">Заказ без чека</div>
+        <div class="kpi-val">${missing.length}</div>
+        <div class="kpi-sub">бесплатная доставка, платила компания</div></div>
+      <div class="kpi ${orphan.length ? 'r' : ''}"><div class="kpi-label">Чек без заказа</div>
+        <div class="kpi-val">${orphan.length}</div>
+        <div class="kpi-sub">номер не нашёлся в 0080</div></div>
+      <div class="kpi ${noNum.length ? 'y' : ''}"><div class="kpi-label">Чек без номера</div>
+        <div class="kpi-val">${noNum.length}</div>
+        <div class="kpi-sub">${dlMoney(noNum.reduce((a, b) => a + b.sum, 0))}</div></div>
+    </div>`;
+  if (missing.length) {
+    const byMonth = {};
+    missing.forEach(o => { const k = o.date.slice(0, 7); (byMonth[k] = byMonth[k] || []).push(o); });
+    html += `<div class="status-box s-err" style="margin-top:12px;"><div class="s-icon">❌</div><div>
+      <div class="s-title">${plural(missing.length, 'заказ', 'заказа', 'заказов')} с бесплатной доставкой без чека — на ${
+        dlMoney(missing.reduce((a, b) => a + b.goods, 0))} товаров</div>
+      <div class="s-sub">${Object.keys(byMonth).sort().map(k =>
+        dlMonthTitle(k) + ' — ' + plural(byMonth[k].length, 'заказ', 'заказа', 'заказов')).join(' · ')}.
+        Курьера по ним оплачивала компания, а подтверждения нет.</div></div></div>`;
+  }
+  if (orphan.length) html += `<div class="status-box s-warn" style="margin-top:12px;">
+    <div class="s-icon">🔍</div><div>
+      <div class="s-title">Чек есть, а заказа с таким номером в 0080 нет</div>
+      <div class="s-sub">${orphan.slice(0, 20).map(r => '№' + r.num + ' · ' + ruDate(r.date) + ' · ' +
+        dlMoney(r.sum)).join('<br>')}${orphan.length > 20 ? '<br>…и ещё ' + (orphan.length - 20) : ''}</div>
+    </div></div>`;
+  html += `</div>`;
+
+  // ── по службам, из чеков ──
   const byS = dlGroup(R, r => r.serv).sort(dlSort);
+  const servN = R.filter(r => r.serv).length;
   html += `<div class="card"><div class="card-head"><div>
       <div class="card-title">🚕 По службам</div>
       <div style="font-size:11px;color:var(--text3);margin-top:2px;">
-        служба указана у ${servN} из ${R.length} — ${dlPct(servN, R.length)} строк</div>
+        служба указана у ${servN} из ${R.length} чеков — ${dlPct(servN, R.length)}</div>
     </div></div>` +
     dlTable(
-      [{t:'Служба'},{t:'Доставок',r:1},{t:'Расход',r:1},{t:'Сумма заказов',r:1},{t:'Доля',r:1},{t:'Ср. расход',r:1}],
-      byS.map(s => ({ cells: [
-        s.k, s.n, dlMoney(s.sum), s.pn ? dlMoney(s.osum) : '—',
-        s.k === '(не указано)' ? 'не считается' : dlPct(s.psum, s.osum),
-        dlMoney(s.sum / s.n)
-      ], __dim: s.k === '(не указано)' })),
-      ['Итого', R.length, dlMoney(sum), dlMoney(osum), dlPct(psum, osum), dlMoney(sum / R.length)]
+      [{t:'Служба'},{t:'Чеков',r:1},{t:'Отдали курьерам',r:1},{t:'Доля в расходе',r:1},{t:'Ср. поездка',r:1}],
+      byS.map(s => ({ cells: [s.k, s.n, dlMoney(s.sum), dlPct(s.sum, sum), dlMoney(s.sum / s.n)],
+                      __dim: s.k === '(не указано)' })),
+      ['Итого', R.length, dlMoney(sum), '100,00 %', dlMoney(sum / R.length)]
     ) + `</div>`;
 
-  // ── по филиалам ──
-  const byB = dlGroup(R, r => r.br).sort(dlSort);
-  const maxShare = Math.max(...byB.filter(b => b.osum > 0).map(b => b.psum / b.osum), 0.0001);
+  // ── по филиалам: филиал берём из комментария к заказу ──
+  const brOf = o => { const m = String(o.comment || '').toLowerCase()
+      .match(/(?:^|[^а-яёa-z0-9])т{1,2}\s*(\d{1,2})/); return m ? 'ТТ' + m[1] : ''; };
+  const brRows = {};
+  cour.forEach(o => {
+    const k = brOf(o) || '(не указан)';
+    brRows[k] = brRows[k] || { k, n: 0, goods: 0, spent: 0, cv: 0, nd: 0 };
+    brRows[k].n++; brRows[k].goods += o.goods;
+    if (needsR(o)) { brRows[k].nd++; if (haveNum[o.num]) brRows[k].cv++; }
+  });
+  R.forEach(r => { if (r.num && byNum[r.num]) {
+    const k = brOf(byNum[r.num]) || '(не указан)';
+    if (brRows[k]) brRows[k].spent += r.sum;
+  }});
+  const brList = Object.values(brRows).sort((a, b) => (a.k === '(не указан)') - (b.k === '(не указан)') || b.goods - a.goods);
+  const brKnown = cour.filter(o => brOf(o)).length;
   html += `<div class="card"><div class="card-head"><div>
       <div class="card-title">🏪 По филиалам</div>
       <div style="font-size:11px;color:var(--text3);margin-top:2px;">
-        филиал указан у ${brN} из ${R.length} — ${dlPct(brN, R.length)} строк</div>
+        филиал читается из комментария оператора — распознан у ${brKnown} из ${cour.length} курьерских заказов</div>
     </div></div>` +
     dlTable(
-      [{t:'Филиал'},{t:'Доставок',r:1},{t:'Расход',r:1},{t:'Сумма заказов',r:1},{t:'Доля',r:1},{t:'Ср. расход',r:1},{t:''}],
-      byB.map(b => ({ cells: [
-        b.k, b.n, dlMoney(b.sum), b.pn ? dlMoney(b.osum) : '—',
-        b.k === '(не указано)' ? 'не считается' : dlPct(b.psum, b.osum),
-        dlMoney(b.sum / b.n),
-        b.osum > 0 && b.k !== '(не указано)'
-          ? `<span style="display:block;height:6px;border-radius:3px;background:var(--a2);width:${
-              Math.max(3, Math.round((b.psum / b.osum) / maxShare * 100))}px;"></span>` : ''
-      ], __dim: b.k === '(не указано)' })),
-      ['Итого', R.length, dlMoney(sum), dlMoney(osum), dlPct(psum, osum), dlMoney(sum / R.length), '']
-    ) + `</div>`;
-
-  // ── по типу ──
-  const byT = dlGroup(R, r => r.type).sort(dlSort);
-  html += `<div class="card"><div class="card-head"><div>
-      <div class="card-title">🎁 По типу доставки</div>
-      <div style="font-size:11px;color:var(--text3);margin-top:2px;">
-        «Бесплатная доставка» и «Беспалтная доставка» — одно и то же, считаются вместе</div>
-    </div></div>` +
-    dlTable(
-      [{t:'Тип'},{t:'Доставок',r:1},{t:'Расход',r:1},{t:'Доля в расходе',r:1},{t:'Сумма заказов',r:1},{t:'Доля',r:1}],
-      byT.map(t => ({ cells: [
-        t.k, t.n, dlMoney(t.sum), dlPct(t.sum, sum),
-        t.pn ? dlMoney(t.osum) : '—', t.pn ? dlPct(t.psum, t.osum) : '—'
-      ] })),
-      ['Итого', R.length, dlMoney(sum), '100,00 %', dlMoney(osum), dlPct(psum, osum)]
-    ) + `</div>`;
+      [{t:'Филиал'},{t:'Курьером',r:1},{t:'Сумма заказов',r:1},{t:'Отдали курьерам',r:1},{t:'Нужен чек',r:1},{t:'Есть чек',r:1}],
+      brList.map(b => ({ cells: [b.k, b.n, dlMoney(b.goods), dlMoney(b.spent), b.nd, b.cv],
+                         __dim: b.k === '(не указан)' })),
+      ['Итого', cour.length, dlMoney(courSum), dlMoney(
+        R.filter(r => r.num && byNum[r.num]).reduce((a, b) => a + b.sum, 0)), need.length, covered.length]
+    ) + `<div style="font-size:11px;color:var(--text3);margin-top:8px;">
+      В колонке «Отдали курьерам» только те чеки, у которых есть номер заказа: иначе филиал не определить.
+    </div></div>`;
 
   // ── чего в цифрах нет ──
   const gaps = [];
-  if (servN < R.length) gaps.push(`<b>Служба не указана у ${plural(R.length - servN, 'доставки', 'доставок', 'доставок')}</b> — это ${
-    dlMoney(R.filter(r => !r.serv).reduce((a, b) => a + b.sum, 0))}, или ${
-    dlPct(R.filter(r => !r.serv).reduce((a, b) => a + b.sum, 0), sum)} всех расходов. Сравнивать службы по таким данным нельзя.`);
-  if (brN < R.length) gaps.push(`<b>Филиал не указан у ${plural(R.length - brN, 'доставки', 'доставок', 'доставок')}</b> — ${
-    dlMoney(R.filter(r => !r.br).reduce((a, b) => a + b.sum, 0))}, или ${
-    dlPct(R.filter(r => !r.br).reduce((a, b) => a + b.sum, 0), sum)} расходов.`);
-  if (paired.length < R.length) gaps.push(`<b>Сумма заказа не указана у ${plural(R.length - paired.length, 'доставки', 'доставок', 'доставок')}</b> — расход по ним ${
-    dlMoney(sum - psum)}. Эти доставки в долю не входят.`);
-  if (numN < R.length) gaps.push(`<b>Номер заказа есть только у ${numN} из ${R.length}</b>. Без номера расход не сверить с отчётом 0080 автоматически.`);
-  const small = byM.filter(m => m.n < 5 && m.n > 0);
-  if (small.length) gaps.push(`<b>Мало данных:</b> ${small.map(m => dlMonthTitle(m.k) + ' — ' + plural(m.n, 'доставка', 'доставки', 'доставок')).join(', ')
-    }. По таким месяцам выводов не делают.`);
-
+  if (noNum.length) gaps.push(`<b>${plural(noNum.length, 'чек', 'чека', 'чеков')} без номера заказа</b> на ${
+    dlMoney(noNum.reduce((a, b) => a + b.sum, 0))} — это переносы из старых таблиц. По номеру их не сверить.`);
+  if (missing.length) gaps.push(`<b>${plural(missing.length, 'заказ', 'заказа', 'заказов')} с бесплатной доставкой без чека.</b> Либо чек не прислали, либо везли своим курьером и не платили.`);
+  const noComm = cour.filter(o => !brOf(o)).length;
+  if (noComm) gaps.push(`<b>У ${plural(noComm, 'заказа', 'заказов', 'заказов')} филиал не читается</b> — оператор не написал его в комментарии.`);
+  const emptyM = mRows.filter(x => x.n > 0 && x.rc === 0);
+  if (emptyM.length) gaps.push(`<b>Месяцы без единого чека:</b> ${emptyM.map(x => dlMonthTitle(x.m)).join(', ')
+    }. Заказы курьером в эти месяцы были, а оплат не записано.`);
   if (gaps.length) html += `<div class="card"><div class="card-head"><div>
       <div class="card-title">⚠️ Чего в этих цифрах нет</div>
       <div style="font-size:11px;color:var(--text3);margin-top:2px;">
