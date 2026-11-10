@@ -941,6 +941,23 @@ details[open] > summary .chev { transform:rotate(90deg); }
     <span class="badge by" id="dlBadge">—</span>
   </div>
   <div class="page-body">
+    <div class="card">
+      <div class="card-head">
+        <div><div class="card-title">🛵 Список доставок Wolt</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px;">
+          на drive.wolt.com выберите день → «Печать» → «Сохранить как PDF» → киньте файл сюда</div></div>
+        <span class="badge by" id="wdBadge">—</span>
+      </div>
+      <div class="upload-zone" id="wdZone" style="padding:16px;"
+           onclick="document.getElementById('wdFile').click()">
+        <div style="font-size:22px;margin-bottom:4px;">📄</div>
+        <div style="font-size:13px;font-weight:700;">Выберите PDF со страницы Wolt Drive</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:3px;">
+          можно за один день или сразу за несколько — повторы перепишутся</div>
+      </div>
+      <input type="file" id="wdFile" accept=".pdf" multiple style="display:none;">
+      <div id="wdMsg" style="font-size:11.5px;margin-top:8px;"></div>
+    </div>
     <div id="dlOut"></div>
     <div style="display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap;">
       <button class="btn btn-o btn-sm" onclick="dlLoad(true)">Обновить</button>
@@ -1381,13 +1398,126 @@ function go(id) {
 }
 
 // ══════════════════════════════════════════════════
+//  ДОСТАВКИ WOLT DRIVE
+//  Страница drive.wolt.com, распечатанная в PDF. Одна доставка —
+//  четыре строки: шапка с ценой и статусом, телефон, адрес доставки,
+//  время вручения. Колонки в шапке разделены широкими пробелами,
+//  поэтому строки собираем по координатам, а не по порядку слов.
+// ══════════════════════════════════════════════════
+const RE_WD_HEAD = /^#(\d+)\s+(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})\s+(.*)$/;
+const RE_WD_MONEY = /([\d][\d\s ]*,\d{2})\s*KZT/g;
+const RE_WD_PHONE = /\+?7\s?\d[\d\s-]{8,}\d/;
+
+function wdNum(s) {
+  return Number(String(s || '').replace(/[^\d,.-]/g, '').replace(/\s/g, '').replace(',', '.')) || 0;
+}
+
+// Склеиваем элементы PDF в строки: большой разрыв по x — это граница колонки
+function wdLines(items) {
+  const rows = {};
+  items.forEach(it => { const y = Math.round(it.y); (rows[y] = rows[y] || []).push(it); });
+  return Object.keys(rows).map(Number).sort((a, b) => b - a).map(y => {
+    const line = rows[y].sort((a, b) => a.x - b.x);
+    let s = '';
+    line.forEach((it, i) => {
+      if (i) s += (it.x - (line[i-1].x + line[i-1].w) > 6) ? '  ' : '';
+      s += it.s;
+    });
+    return s.replace(/\s+$/, '');
+  }).filter(Boolean);
+}
+
+async function parseWoltDrive(file) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+  const lines = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const c = await (await pdf.getPage(i)).getTextContent();
+    lines.push(...wdLines(c.items
+      .map(it => ({ s: String(it.str).replace(/[‎‏]/g, ''), x: it.transform[4],
+                    y: it.transform[5], w: it.width || 0 }))
+      .filter(o => o.s.trim())));
+  }
+  // Режем на записи: каждая начинается со строки «#номер»
+  const blocks = [];
+  lines.forEach(l => {
+    if (RE_WD_HEAD.test(l.trim())) blocks.push([l.trim()]);
+    else if (blocks.length) blocks[blocks.length - 1].push(l.trim());
+  });
+
+  return blocks.map(b => {
+    const m = b[0].match(RE_WD_HEAD);
+    if (!m) return null;
+    const rest = m[7];
+    // Цена — последняя сумма в шапке: перед ней может стоять страховка
+    const money = [...rest.matchAll(RE_WD_MONEY)].map(x => x[1]);
+    const cost = money.length ? wdNum(money[money.length - 1]) : 0;
+    // Статус — то, что идёт после последнего KZT
+    const afterKzt = rest.slice(rest.lastIndexOf('KZT') + 3).trim();
+    const status = (afterKzt.split(/\s{2,}/)[0] || '').trim();
+    // Откуда и получатель: адрес забора заканчивается на «Алматы»
+    const head = rest.slice(0, rest.search(RE_WD_MONEY) >= 0 ? rest.search(RE_WD_MONEY) : rest.length);
+    const cells = head.split(/\s{2,}/).map(s => s.trim()).filter(Boolean);
+    const from = cells[0] || '';
+    const who  = cells.length > 1 ? cells[1] : '';
+    const body = b.slice(1).join('\n');
+    const ph = (body.match(RE_WD_PHONE) || [''])[0].replace(/[\s-]/g, '');
+    // Адрес доставки — строка, которая не дата, не телефон и не «Отслеживание»
+    const to = b.slice(1).map(s => s.trim()).find(s =>
+      s && !/^\+?7/.test(s) && !/^\d{2}\/\d{2}\/\d{4}/.test(s) &&
+      !/Отслеживание|назад|Отменить|Повторить/i.test(s) && s.length > 4) || '';
+    return { id: m[1], date: m[4] + '-' + m[3] + '-' + m[2], time: m[5] + ':' + m[6],
+             from, who, to, phone: ph, cost, status };
+  }).filter(Boolean);
+}
+
+function initWoltDrive() {
+  const inp = document.getElementById('wdFile');
+  if (!inp) return;
+  inp.addEventListener('change', async e => {
+    const files = [...e.target.files];
+    if (!files.length) return;
+    const msg = document.getElementById('wdMsg');
+    const say = (t, c) => { msg.innerHTML = `<span style="color:var(--${c || 'text3'});">${t}</span>`; };
+    say('⏳ Читаем…');
+    let rows = [], names = [];
+    for (const f of files) {
+      try {
+        const r = await parseWoltDrive(f);
+        if (!r.length) throw new Error('не нашлось ни одной доставки');
+        rows = rows.concat(r); names.push(f.name);
+      } catch (err) {
+        say('Файл «' + f.name + '» прочитать не вышло: ' + err.message, 'red');
+        inp.value = ''; return;
+      }
+    }
+    const url = ls('scriptUrl');
+    if (!url) { say('Доставки разобраны (' + rows.length + '), но сохранять некуда: не настроен Google Sheets.', 'yellow'); inp.value=''; return; }
+    say('⏳ Сохраняем ' + plural(rows.length, 'доставку', 'доставки', 'доставок') + '…');
+    try {
+      const r = await fetch(url, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
+        body: JSON.stringify({ type:'wolt', rows, file: names.join(', ') }) });
+      const j = await r.json();
+      if (j.status !== 'ok') throw new Error(j.message || 'таблица ответила ошибкой');
+      say(`✅ Сохранено: новых ${j.added}, обновлено ${j.updated}. Всего в таблице ${j.total}.`, 'green');
+      document.getElementById('wdZone').className = 'upload-zone done';
+      dlLoad(true);
+    } catch (err) {
+      say('Не вышло сохранить: ' + err.message, 'red');
+    }
+    inp.value = '';
+  });
+}
+
+// ══════════════════════════════════════════════════
 //  РАСХОДЫ НА ДОСТАВКУ
 //  Считается по листу «Чеки курьерам»: туда попадают и чеки из
 //  телеграм-бота, и перенесённые строки старых таблиц.
 //  Доля считается только по доставкам, у которых есть И расход,
 //  И сумма заказа — иначе числитель шире знаменателя.
 // ══════════════════════════════════════════════════
-let dlRows = [], dlOrders = [], dlLoaded = false, dlErr = '';
+let dlRows = [], dlOrders = [], dlWolt = [], dlLoaded = false, dlErr = '';
 
 const dlMoney = n => Number(n || 0).toLocaleString('ru-RU',
                       { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₸';
@@ -1429,12 +1559,20 @@ async function dlLoad(force) {
   }
   out.innerHTML = '<div style="text-align:center;padding:28px;color:var(--text3);">⏳ Считаем…</div>';
   try {
-    const [r, ro] = await Promise.all([
+    const [r, ro, rw] = await Promise.all([
       fetch(url + '?action=getReceipts'),
-      fetch(url + '?action=getOrders')
+      fetch(url + '?action=getOrders'),
+      fetch(url + '?action=getWolt')
     ]);
     const j = await r.json();
     const jo = await ro.json();
+    const jw = await rw.json();
+    dlWolt = ((jw && jw.data) || []).map(x => ({
+      id: un(x['ID']), date: un(x['Дата']), time: un(x['Время']),
+      from: un(x['Откуда']), to: un(x['Куда']), who: un(x['Получатель']),
+      phone: un(x['Телефон']).replace(/\D/g, '').slice(-10),
+      cost: numOrZero(x['Стоимость, ₸']), status: un(x['Статус'])
+    })).filter(w => w.id);
     if (j.status !== 'ok') throw new Error(j.message || 'таблица ответила ошибкой');
     const un = s => String(s == null ? '' : s).replace(/^'/, '').trim();
     dlOrders = ((jo && jo.data) || []).map(x => {
@@ -1639,6 +1777,118 @@ function renderDelivery() {
     </div></div>`;
   html += `</div>`;
 
+  // ── Wolt Drive: что он сам показывает ──
+  if (dlWolt.length) {
+    const isCanc = w => /отклон|отмен|не удал/i.test(w.status || '');
+    const isCorp = w => /тәп|тəп|тэп|тап[\s-]?тат|tap[\s-]?tat/i.test(w.who || '');
+    const phOf = s => String(s || '').replace(/\D/g, '').slice(-10);
+    const ordByPhone = {};
+    O.forEach(o => { const k = phOf(o.phone); if (k) (ordByPhone[k] = ordByPhone[k] || []).push(o); });
+
+    const wCanc = dlWolt.filter(isCanc);
+    const wOk   = dlWolt.filter(w => !isCanc(w));
+    const wCorp = wOk.filter(isCorp);
+    const wCli  = wOk.filter(w => !isCorp(w));
+    const sumOf = a => a.reduce((s, w) => s + w.cost, 0);
+
+    // Связь с заказами: телефон и день ±1
+    const near = (a, b) => Math.abs(new Date(a + 'T12:00:00Z') - new Date(b + 'T12:00:00Z')) <= 86400000;
+    wCli.forEach(w => {
+      const cand = (ordByPhone[w.phone] || []).filter(o => near(o.date, w.date));
+      w.ord = cand.length === 1 ? cand[0] : null;
+      w.many = cand.length > 1;
+    });
+    const linked = wCli.filter(w => w.ord);
+    const lost   = wCli.filter(w => !w.ord);
+
+    // Недобор: Wolt взял больше, чем взяли с клиента
+    const gap = linked.map(w => ({ w, o: w.ord, d: w.cost - w.ord.deliv }))
+                      .filter(x => Math.round(x.d) !== 0)
+                      .sort((a, b) => b.d - a.d);
+    const under = gap.filter(x => x.d > 0);
+
+    // Повторные попытки: один адрес и телефон в один день несколько раз
+    // Группируем по адресу, а не по телефону: в Wolt телефон бывает с опечаткой
+    const tries = {};
+    dlWolt.forEach(w => {
+      const k = w.date + '|' + String(w.to || w.phone).toLowerCase().replace(/[^a-zа-я0-9]+/g, '');
+      (tries[k] = tries[k] || []).push(w);
+    });
+    const retry = Object.values(tries).filter(a => a.length > 1);
+
+    // Заказы Wolt без доставки в списке — за те дни, что загружены
+    const wDays = new Set(dlWolt.map(w => w.date));
+    const seen = new Set(linked.map(w => w.ord.num));
+    const noDrive = wolt.filter(o => wDays.has(o.date) && !seen.has(o.num));
+
+    html += `<div class="card"><div class="card-head"><div>
+        <div class="card-title">📋 Что показывает сам Wolt</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px;">
+          из списка доставок drive.wolt.com · ${plural(wDays.size, 'день', 'дня', 'дней')} загружено</div>
+      </div></div>
+      <div class="kpi-row">
+        <div class="kpi g"><div class="kpi-label">Клиентам</div>
+          <div class="kpi-val">${dlMoney(sumOf(wCli))}</div>
+          <div class="kpi-sub">${plural(wCli.length, 'доставка', 'доставки', 'доставок')}</div></div>
+        <div class="kpi"><div class="kpi-label">Между своими</div>
+          <div class="kpi-val">${dlMoney(sumOf(wCorp))}</div>
+          <div class="kpi-sub">${plural(wCorp.length, 'доставка', 'доставки', 'доставок')} · не на клиента</div></div>
+        <div class="kpi ${wCanc.length ? 'r' : ''}"><div class="kpi-label">Отклонённые</div>
+          <div class="kpi-val">${dlMoney(sumOf(wCanc))}</div>
+          <div class="kpi-sub">${plural(wCanc.length, 'доставка', 'доставки', 'доставок')} · платим или нет — вопрос к Wolt</div></div>
+        <div class="kpi ${lost.length ? 'y' : ''}"><div class="kpi-label">Сошлись с заказом</div>
+          <div class="kpi-val">${linked.length} из ${wCli.length}</div>
+          <div class="kpi-sub">по телефону клиента</div></div>
+      </div>`;
+
+    if (retry.length) html += `<div class="status-box s-warn" style="margin-top:12px;">
+      <div class="s-icon">🔁</div><div>
+        <div class="s-title">Повторные попытки по одному адресу: ${retry.length}</div>
+        <div class="s-sub">${retry.slice(0, 6).map(a =>
+          ruDate(a[0].date) + ' · ' + (a[0].who || a[0].to).slice(0, 26) + ' · ' +
+          plural(a.length, 'попытка', 'попытки', 'попыток') + ' по ' + dlMoney(a[0].cost) +
+          ' (' + a.map(w => w.status).join(', ') + ')').join('<br>')}
+          <br>Если Wolt берёт деньги за каждую, одна доставка обходится в ${
+          dlMoney(retry.reduce((s, a) => s + a.reduce((x, w) => x + w.cost, 0), 0))} вместо ${
+          dlMoney(retry.reduce((s, a) => s + a[0].cost, 0))}.</div>
+      </div></div>`;
+
+    if (gap.length) html += `<div class="card" style="box-shadow:none;border:none;padding:0;margin:12px 0 0;">
+      <div style="font-size:13px;font-weight:700;margin-bottom:6px;">Сколько взяли с клиента и сколько забрал Wolt</div>` +
+      dlTable(
+        [{t:'Дата'},{t:'Заказ'},{t:'Клиент'},{t:'С клиента',r:1},{t:'Wolt',r:1},{t:'Разница',r:1}],
+        gap.slice(0, 20).map(x => ({ cells: [
+          ruDate(x.w.date), '№' + x.o.num, (x.o.client || x.w.who || '').slice(0, 20),
+          dlMoney(x.o.deliv), dlMoney(x.w.cost),
+          (x.d > 0 ? '<span style="color:var(--red);">−' : '<span style="color:var(--green);">+') +
+            dlMoney(Math.abs(x.d)) + '</span>'
+        ] })),
+        ['Итого', '', '', dlMoney(linked.reduce((s, w) => s + w.ord.deliv, 0)),
+         dlMoney(sumOf(linked)), dlMoney(linked.reduce((s, w) => s + w.ord.deliv, 0) - sumOf(linked))]
+      ) +
+      `<div style="font-size:11px;color:var(--text3);margin-top:6px;">
+        Красным — доставка обошлась дороже, чем взяли с клиента. Бесплатная доставка тоже сюда попадает:
+        с клиента 0,00 ₸, а Wolt своё берёт.</div></div>`;
+
+    if (lost.length) html += `<div class="status-box s-warn" style="margin-top:12px;">
+      <div class="s-icon">🔍</div><div>
+        <div class="s-title">${plural(lost.length, 'доставка', 'доставки', 'доставок')} Wolt без заказа в iiko</div>
+        <div class="s-sub">${lost.slice(0, 8).map(w => ruDate(w.date) + ' · ' + (w.who || '—') + ' · ' +
+          w.to.slice(0, 30) + ' · ' + dlMoney(w.cost) + (w.many ? ' · несколько заказов на этот телефон' : '')).join('<br>')}
+          ${lost.length > 8 ? '<br>…и ещё ' + (lost.length - 8) : ''}</div></div></div>`;
+
+    if (noDrive.length) html += `<div class="status-box s-warn" style="margin-top:12px;">
+      <div class="s-icon">❓</div><div>
+        <div class="s-title">${plural(noDrive.length, 'заказ', 'заказа', 'заказов')} с курьером Wolt, которых нет в списке Wolt</div>
+        <div class="s-sub">За загруженные дни. Либо везли не через Wolt, а курьера в заказе записали по привычке,
+          либо доставку создали другим числом.<br>${noDrive.slice(0, 8).map(o =>
+          '№' + o.num + ' · ' + ruDate(o.date) + ' · ' + (o.client || '').slice(0, 18) + ' · ' +
+          o.addr.slice(0, 26)).join('<br>')}${noDrive.length > 8 ? '<br>…и ещё ' + (noDrive.length - 8) : ''}</div>
+      </div></div>`;
+
+    html += `</div>`;
+  }
+
   // ── кто вёз, по данным 0080 ──
   const byCour = {};
   cour.forEach(o => {
@@ -1723,8 +1973,14 @@ function renderDelivery() {
   const emptyM = mRows.filter(x => x.n > 0 && x.rc === 0);
   if (emptyM.length) gaps.push(`<b>Месяцы без единого чека:</b> ${emptyM.map(x => dlMonthTitle(x.m)).join(', ')
     }. Заказы Яндекса и Индрайвера в эти месяцы были, а оплат не записано.`);
-  if (wolt.length) gaps.push(`<b>Стоимости Wolt здесь нет.</b> ${plural(wolt.length, 'доставка', 'доставки', 'доставок')
-    } на ${dlMoney(woltSum)} заказов везли через Wolt, он выставляет счёт за месяц. Его суммы — в разделе «Аналитика», блок «Счёт Wolt за месяц».`);
+  if (wolt.length && !dlWolt.length) gaps.push(`<b>Стоимости Wolt здесь нет.</b> ${plural(wolt.length, 'доставка', 'доставки', 'доставок')
+    } на ${dlMoney(woltSum)} заказов везли через Wolt, он выставляет счёт за месяц. Загрузите список с drive.wolt.com — и стоимость появится, не дожидаясь счёта.`);
+  if (dlWolt.length) {
+    const wDays2 = new Set(dlWolt.map(w => w.date));
+    const noWolt = [...new Set(wolt.map(o => o.date))].filter(d => !wDays2.has(d));
+    if (noWolt.length) gaps.push(`<b>Список Wolt загружен не за все дни.</b> Доставки Wolt были ещё в ${
+      plural(noWolt.length, 'день', 'дня', 'дней')}, по которым списка нет — их стоимость в отчёте не учтена.`);
+  }
   if (gaps.length) html += `<div class="card"><div class="card-head"><div>
       <div class="card-title">⚠️ Чего в этих цифрах нет</div>
       <div style="font-size:11px;color:var(--text3);margin-top:2px;">
@@ -5922,6 +6178,7 @@ function ordReset() {
 }
 
 function initOrdersUpload() {
+  initWoltDrive();
   const inp = document.getElementById('ordFiles');
   if (!inp) return;
   inp.addEventListener('change', async e => {

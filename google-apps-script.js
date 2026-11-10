@@ -20,6 +20,7 @@ const SHEET_TRANSACTIONS = 'Транзакции';
 const SHEET_RECEIPTS     = 'Чеки курьерам';
 const SHEET_ORDERS       = 'Доставки 0080';
 const SHEET_UPLOADS      = 'Загрузки 0080';
+const SHEET_WOLT         = 'Доставки Wolt';
 
 // ════════════════════════════════════════════════════════════
 //  GET — получение данных (история смен)
@@ -64,6 +65,10 @@ function doGet(e) {
     return jsonResponse(getOrders(e.parameter.from || '', e.parameter.to || ''));
   }
 
+  if (action === 'getWolt') {
+    return jsonResponse(getWolt(e.parameter.from || '', e.parameter.to || ''));
+  }
+
   if (action === 'getUploads') {
     return jsonResponse(getUploads());
   }
@@ -101,6 +106,10 @@ function doPost(e) {
     if (data.type === 'transactions') {
       saveTransactions(data);
       return jsonResponse({ status: 'ok', message: 'Транзакции сохранены' });
+    }
+
+    if (data.type === 'wolt') {
+      return jsonResponse(saveWolt(data));
     }
 
     if (data.type === 'orders') {
@@ -1333,6 +1342,75 @@ function getUploads() {
     out.push(o);
   }
   return { status: 'ok', data: out.slice(-50) };
+}
+
+// ══════════════════════════════════════════════════════════
+//  ДОСТАВКИ WOLT DRIVE
+//  Страница drive.wolt.com печатается в PDF и загружается в тул.
+//  Ключ — номер доставки Wolt: повторная загрузка того же дня
+//  переписывает строки, а не плодит их.
+// ══════════════════════════════════════════════════════════
+const WOLT_HEAD = ['ID', 'Дата', 'Время', 'Откуда', 'Куда', 'Получатель', 'Телефон',
+                   'Стоимость, ₸', 'Статус', 'Обновлено', 'Файл'];
+
+function saveWolt(data) {
+  const list = data.rows || [];
+  if (!list.length) return { status: 'error', message: 'в файле нет доставок' };
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const tz = ss.getSpreadsheetTimeZone();
+  const now = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd HH:mm');
+  const file = String(data.file || '').slice(0, 120);
+
+  const sheet = getOrCreateSheet(SHEET_WOLT, WOLT_HEAD);
+  const cols = WOLT_HEAD.length;
+  const last = sheet.getLastRow();
+  const byId = {}, order = [];
+  if (last > 1) {
+    sheet.getRange(2, 1, last - 1, cols).getValues().forEach(function (r) {
+      const id = String(r[0] || '').replace(/^'/, '').trim();
+      if (!id) return;
+      if (!(id in byId)) order.push(id);
+      byId[id] = r;
+    });
+  }
+
+  let added = 0, updated = 0;
+  list.forEach(function (w) {
+    const id = String(w.id || '').trim();
+    if (!id) return;
+    const row = ["'" + id, "'" + (w.date || ''), "'" + (w.time || ''), w.from || '', w.to || '',
+                 w.who || '', "'" + (w.phone || ''), Number(w.cost || 0), w.status || '', now, file];
+    if (id in byId) updated++; else { order.push(id); added++; }
+    byId[id] = row;
+  });
+
+  const out = order.map(function (id) { return byId[id]; })
+    .sort(function (a, b) {
+      const da = String(a[1] || ''), db = String(b[1] || '');
+      return da === db ? String(a[0]).localeCompare(String(b[0])) : da.localeCompare(db);
+    });
+  if (last > 1) sheet.getRange(2, 1, last - 1, cols).clearContent();
+  if (out.length) sheet.getRange(2, 1, out.length, cols).setValues(out);
+
+  return { status: 'ok', total: out.length, added: added, updated: updated };
+}
+
+function getWolt(from, to) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_WOLT);
+  if (!sheet || sheet.getLastRow() < 2) return { status: 'ok', data: [] };
+  const vals = sheet.getRange(1, 1, sheet.getLastRow(), sheet.getLastColumn()).getValues();
+  const head = vals[0].map(String);
+  const out = [];
+  for (let i = 1; i < vals.length; i++) {
+    const o = {};
+    head.forEach(function (h, c) { o[h] = normalizeCell(h, vals[i][c]); });
+    const d = String(o['Дата'] || '').replace(/^'/, '');
+    if (from && d < from) continue;
+    if (to && d > to) continue;
+    out.push(o);
+  }
+  return { status: 'ok', data: out };
 }
 
 // ══════════════════════════════════════════════════════════
