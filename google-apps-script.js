@@ -371,12 +371,46 @@ function getTransactions(date) {
 //  поэтому для восстановления исходной даты берём именно его, а не
 //  Asia/Almaty)
 // ════════════════════════════════════════════════════════════
+let TZ_CACHE_ = null;
+function sheetTz_() {
+  if (!TZ_CACHE_) TZ_CACHE_ = SpreadsheetApp.openById(SHEET_ID).getSpreadsheetTimeZone();
+  return TZ_CACHE_;
+}
+
+// Колонки со временем: из Date нужны часы и минуты, а не дата 1899 года
+const TIME_HEADERS_ = { 'Время': 1, 'Время открытия': 1, 'Время закрытия': 1 };
+
 function normalizeCell(header, value) {
-  if (value instanceof Date && (header === 'Дата' || header === 'Дата заказа')) {
-    const tz = SpreadsheetApp.openById(SHEET_ID).getSpreadsheetTimeZone();
-    return Utilities.formatDate(value, tz, 'yyyy-MM-dd');
+  if (!(value instanceof Date)) return value;
+  const h = String(header || '');
+  if (TIME_HEADERS_[h]) return Utilities.formatDate(value, sheetTz_(), 'HH:mm');
+  if (h === 'Обновлено' || h === 'Когда') {
+    return Utilities.formatDate(value, sheetTz_(), 'yyyy-MM-dd HH:mm');
+  }
+  if (/^Дата/.test(h) || h === 'Учетный день' || h === 'Учётный день') {
+    return Utilities.formatDate(value, sheetTz_(), 'yyyy-MM-dd');
   }
   return value;
+}
+
+// ════════════════════════════════════════════════════════════
+//  Возвращает текстовым колонкам апостроф перед перезаписью.
+//  getValues() апостроф не отдаёт, поэтому строка «2026-10-02»,
+//  прочитанная и записанная обратно как есть, превращается в дату.
+//  kinds: { индекс колонки: 'text' | 'date' | 'time' }
+// ════════════════════════════════════════════════════════════
+function reText_(row, kinds) {
+  Object.keys(kinds).forEach(function (i) {
+    const k = kinds[i];
+    let v = row[i];
+    if (v instanceof Date) {
+      v = Utilities.formatDate(v, sheetTz_(), k === 'time' ? 'HH:mm' : 'yyyy-MM-dd');
+    } else {
+      v = String(v == null ? '' : v).replace(/^'/, '').trim();
+    }
+    row[i] = v ? "'" + v : '';
+  });
+  return row;
 }
 
 // ════════════════════════════════════════════════════════════
@@ -1254,6 +1288,8 @@ const ORDERS_HEAD = ['Номер', 'Учетный день', 'Дата откр
                      'Оператор', 'Курьер', 'Тип доставки', 'Клиент', 'Телефон',
                      'Адрес', 'Комментарий', 'Сумма, ₸', 'Доставка, ₸', 'Позиций',
                      'Обновлено', 'Файл'];
+// Текстовые колонки отчёта 0080: номер, две даты, время, телефон
+const ORDERS_TEXTCOLS = { 0: 'text', 1: 'date', 2: 'date', 3: 'time', 8: 'text' };
 
 function saveOrders(data) {
   const list = data.orders || [];
@@ -1294,7 +1330,7 @@ function saveOrders(data) {
   });
 
   // Пишем обратно одним куском: по дню, потом по номеру
-  const out = order.map(function (n) { return byNum[n]; })
+  const out = order.map(function (n) { return reText_(byNum[n], ORDERS_TEXTCOLS); })
     .sort(function (a, b) {
       const da = String(a[1] || ''), db = String(b[1] || '');
       return da === db ? String(a[0]).localeCompare(String(b[0])) : da.localeCompare(db);
@@ -1352,6 +1388,8 @@ function getUploads() {
 // ══════════════════════════════════════════════════════════
 const WOLT_HEAD = ['ID', 'Дата', 'Время', 'Откуда', 'Куда', 'Получатель', 'Телефон',
                    'Стоимость, ₸', 'Статус', 'Обновлено', 'Файл'];
+// Текстовые колонки списка Wolt: id, дата, время, телефон
+const WOLT_TEXTCOLS = { 0: 'text', 1: 'date', 2: 'time', 6: 'text' };
 
 function saveWolt(data) {
   const list = data.rows || [];
@@ -1384,7 +1422,7 @@ function saveWolt(data) {
     byId[id] = row;
   });
 
-  const out = order.map(function (id) { return byId[id]; })
+  const out = order.map(function (id) { return reText_(byId[id], WOLT_TEXTCOLS); })
     .sort(function (a, b) {
       const da = String(a[1] || ''), db = String(b[1] || '');
       return da === db ? String(a[0]).localeCompare(String(b[0])) : da.localeCompare(db);
