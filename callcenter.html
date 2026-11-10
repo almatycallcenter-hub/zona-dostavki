@@ -513,6 +513,9 @@ details[open] > summary .chev { transform:rotate(90deg); }
     <button class="nav-item" onclick="go('orders')">
       <span class="icon">🧾</span> Заказы
     </button>
+    <button class="nav-item" onclick="go('delivery')">
+      <span class="icon">🛵</span> Доставка
+    </button>
     <button class="nav-item" onclick="go('analytics')">
       <span class="icon">📈</span> Аналитика
     </button>
@@ -927,6 +930,21 @@ details[open] > summary .chev { transform:rotate(90deg); }
     <div id="ordSummary"></div>
     <div id="ordList"></div>
 
+  </div>
+</div>
+
+<div class="page" id="page-delivery">
+  <div class="page-header">
+    <div><div class="page-title">🛵 Расходы на доставку</div>
+    <div class="page-sub">что платим курьерам и сколько это от суммы заказа</div></div>
+    <span class="badge by" id="dlBadge">—</span>
+  </div>
+  <div class="page-body">
+    <div id="dlOut"></div>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap;">
+      <button class="btn btn-o btn-sm" onclick="dlLoad(true)">Обновить</button>
+      <span style="font-size:11px;color:var(--text3);" id="dlStamp"></span>
+    </div>
   </div>
 </div>
 
@@ -1358,6 +1376,263 @@ function go(id) {
   const mb = document.getElementById('mn-' + id);
   if (mb) mb.classList.add('active');
   window.scrollTo(0, 0);
+  if (id === 'delivery') dlLoad();
+}
+
+// ══════════════════════════════════════════════════
+//  РАСХОДЫ НА ДОСТАВКУ
+//  Считается по листу «Чеки курьерам»: туда попадают и чеки из
+//  телеграм-бота, и перенесённые строки старых таблиц.
+//  Доля считается только по доставкам, у которых есть И расход,
+//  И сумма заказа — иначе числитель шире знаменателя.
+// ══════════════════════════════════════════════════
+let dlRows = [], dlLoaded = false, dlErr = '';
+
+const dlMoney = n => Number(n || 0).toLocaleString('ru-RU',
+                      { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₸';
+const dlPct = (a, b) => b > 0 ? (a / b * 100).toFixed(2).replace('.', ',') + ' %' : '—';
+const DL_MONTHS = ['января','февраля','марта','апреля','мая','июня',
+                   'июля','августа','сентября','октября','ноября','декабря'];
+const dlMonthName = ym => {
+  const m = String(ym || '').match(/^(\d{4})-(\d{2})$/);
+  if (!m) return ym || 'без даты';
+  const nm = DL_MONTHS[Number(m[2]) - 1] || m[2];
+  return nm.charAt(0).toUpperCase() + nm.slice(1).replace(/я$/, 'ь').replace(/а$/, '') + ' ' + m[1];
+};
+// Названия месяцев в родительном падеже не годятся для заголовка столбца
+const DL_NOM = ['Январь','Февраль','Март','Апрель','Май','Июнь',
+                'Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+const dlMonthTitle = ym => {
+  const m = String(ym || '').match(/^(\d{4})-(\d{2})$/);
+  return m ? (DL_NOM[Number(m[2]) - 1] || m[2]) + ' ' + m[1] : (ym || 'без даты');
+};
+// В таблице один и тот же тип записан по-разному, с опечаткой в том числе
+const dlType = s => /беспл|беспал/i.test(s || '') ? 'Бесплатная доставка'
+                  : (String(s || '').trim() || 'не указан');
+// В заголовке отчёта год обязателен — период может лежать в двух годах
+const dlFull = iso => {
+  const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? m[3] + '.' + m[2] + '.' + m[1] : (iso || '—');
+};
+// Строка «не указано» всегда внизу: это не категория, а пробел в данных
+const dlSort = (a, b) => (a.k === '(не указано)') - (b.k === '(не указано)') || b.sum - a.sum;
+
+async function dlLoad(force) {
+  const url = ls('scriptUrl');
+  const out = document.getElementById('dlOut');
+  if (!out) return;
+  if (dlLoaded && !force) { renderDelivery(); return; }
+  if (!url) {
+    dlErr = 'Впишите адрес Google Apps Script в разделе ⚙️ Настройки — без него отчёт не из чего строить.';
+    renderDelivery(); return;
+  }
+  out.innerHTML = '<div style="text-align:center;padding:28px;color:var(--text3);">⏳ Считаем…</div>';
+  try {
+    const r = await fetch(url + '?action=getReceipts');
+    const j = await r.json();
+    if (j.status !== 'ok') throw new Error(j.message || 'таблица ответила ошибкой');
+    const un = s => String(s == null ? '' : s).replace(/^'/, '').trim();
+    dlRows = (j.data || []).map(x => ({
+      date:  un(x['Дата перевода']) || un(x['Дата']),
+      sum:   numOrZero(x['Сумма курьеру, ₸']),
+      osum:  numOrZero(x['Сумма заказа, ₸']),
+      serv:  un(x['Служба']),
+      br:    un(x['Филиал']).toUpperCase(),
+      addr:  un(x['Адрес']),
+      type:  dlType(un(x['Тип доставки'])),
+      num:   un(x['№ заказа'])
+    })).filter(r => r.sum > 0);
+    dlLoaded = true; dlErr = '';
+    document.getElementById('dlStamp').textContent =
+      'обновлено в ' + new Date().toLocaleTimeString('ru-RU').slice(0, 5);
+  } catch (e) {
+    dlErr = 'Не вышло забрать данные: ' + e.message;
+  }
+  renderDelivery();
+}
+
+function dlGroup(rows, f) {
+  const m = {};
+  rows.forEach(r => {
+    const k = f(r) || '(не указано)';
+    m[k] = m[k] || { k, n: 0, sum: 0, osum: 0, pn: 0, psum: 0 };
+    m[k].n++; m[k].sum += r.sum;
+    if (r.osum > 0) { m[k].pn++; m[k].psum += r.sum; m[k].osum += r.osum; }
+  });
+  return Object.values(m);
+}
+
+function dlTable(cols, rows, totalRow) {
+  return `<div class="tbl-wrap" style="overflow-x:auto;"><table class="tbl">
+    <thead><tr>${cols.map(c => `<th${c.r ? ' style="text-align:right;"' : ''}>${c.t}</th>`).join('')}</tr></thead>
+    <tbody>${rows.map(r => `<tr${r.__dim ? ' style="color:var(--text3);"' : ''}>${
+      r.cells.map((v, i) => `<td${cols[i].r ? ' style="text-align:right;"' : ''}>${v}</td>`).join('')
+    }</tr>`).join('')}
+    ${totalRow ? `<tr style="font-weight:700;border-top:2px solid var(--line);">${
+      totalRow.map((v, i) => `<td${cols[i].r ? ' style="text-align:right;"' : ''}>${v}</td>`).join('')}</tr>` : ''}
+    </tbody></table></div>`;
+}
+
+function renderDelivery() {
+  const out = document.getElementById('dlOut');
+  const bdg = document.getElementById('dlBadge');
+  if (!out) return;
+
+  if (dlErr) {
+    bdg.className = 'badge br'; bdg.textContent = 'Ошибка';
+    out.innerHTML = `<div class="status-box s-err"><div class="s-icon">❌</div>
+      <div><div class="s-title">${dlErr}</div></div></div>`;
+    return;
+  }
+  if (!dlLoaded) {
+    bdg.className = 'badge by'; bdg.textContent = '—';
+    out.innerHTML = '<div style="text-align:center;padding:28px;color:var(--text3);">⏳ Считаем…</div>';
+    return;
+  }
+  if (!dlRows.length) {
+    bdg.className = 'badge by'; bdg.textContent = 'Пусто';
+    out.innerHTML = `<div class="status-box s-warn"><div class="s-icon">📋</div><div>
+      <div class="s-title">В листе «Чеки курьерам» пока нет ни одной строки</div>
+      <div class="s-sub">Отчёт появится, как только операторы пришлют первые чеки в бот.</div>
+    </div></div>`;
+    return;
+  }
+
+  const R = dlRows;
+  const paired = R.filter(r => r.osum > 0);          // есть и расход, и сумма заказа
+  const sum   = R.reduce((a, b) => a + b.sum, 0);
+  const osum  = paired.reduce((a, b) => a + b.osum, 0);
+  const psum  = paired.reduce((a, b) => a + b.sum, 0);
+  const dates = R.map(r => r.date).filter(Boolean).sort();
+  const servN = R.filter(r => r.serv).length;
+  const brN   = R.filter(r => r.br).length;
+  const numN  = R.filter(r => r.num).length;
+
+  bdg.className = 'badge bg';
+  bdg.textContent = plural(R.length, 'доставка', 'доставки', 'доставок');
+
+  let html = `<div class="card">
+    <div class="kpi-row">
+      <div class="kpi"><div class="kpi-label">Расход на доставку</div>
+        <div class="kpi-val">${dlMoney(sum)}</div>
+        <div class="kpi-sub">${plural(R.length, 'доставка', 'доставки', 'доставок')}</div></div>
+      <div class="kpi"><div class="kpi-label">Сумма заказов</div>
+        <div class="kpi-val">${dlMoney(osum)}</div>
+        <div class="kpi-sub">по ${paired.length} из ${R.length}</div></div>
+      <div class="kpi g"><div class="kpi-label">Доля доставки</div>
+        <div class="kpi-val">${dlPct(psum, osum)}</div>
+        <div class="kpi-sub">${dlMoney(psum)} ÷ ${dlMoney(osum)}</div></div>
+      <div class="kpi y"><div class="kpi-label">Средний расход</div>
+        <div class="kpi-val">${dlMoney(sum / R.length)}</div>
+        <div class="kpi-sub">на одну доставку</div></div>
+    </div>
+    <div style="font-size:11.5px;color:var(--text3);margin-top:10px;">
+      Период ${dates.length ? dlFull(dates[0]) + ' — ' + dlFull(dates[dates.length - 1]) : '—'}.
+      Доля считается только по доставкам, где есть и расход, и сумма заказа:
+      иначе в числитель попадёт то, чего нет в знаменателе.
+    </div>
+  </div>`;
+
+  // ── по месяцам ──
+  const byM = dlGroup(R, r => String(r.date || '').slice(0, 7)).sort((a, b) => a.k.localeCompare(b.k));
+  html += `<div class="card"><div class="card-head"><div>
+      <div class="card-title">📅 По месяцам</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:2px;">
+        доля падает, если растёт средний чек, а не если дешевеет курьер</div>
+    </div></div>` +
+    dlTable(
+      [{t:'Месяц'},{t:'Доставок',r:1},{t:'Расход',r:1},{t:'Сумма заказов',r:1},
+       {t:'Доля',r:1},{t:'Ср. расход',r:1},{t:'Ср. заказ',r:1}],
+      byM.map(m => ({ cells: [
+        dlMonthTitle(m.k), m.n + (m.pn !== m.n ? ' (' + m.pn + ' с заказом)' : ''),
+        dlMoney(m.sum), m.pn ? dlMoney(m.osum) : '—',
+        m.pn ? dlPct(m.psum, m.osum) : 'не считается',
+        dlMoney(m.sum / m.n), m.pn ? dlMoney(m.osum / m.pn) : '—'
+      ], __dim: !m.pn })),
+      ['Итого', R.length + (paired.length !== R.length ? ' (' + paired.length + ' с заказом)' : ''),
+       dlMoney(sum), dlMoney(osum), dlPct(psum, osum), dlMoney(sum / R.length),
+       dlMoney(osum / paired.length)]
+    ) + `</div>`;
+
+  // ── по службам ──
+  const byS = dlGroup(R, r => r.serv).sort(dlSort);
+  html += `<div class="card"><div class="card-head"><div>
+      <div class="card-title">🚕 По службам</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:2px;">
+        служба указана у ${servN} из ${R.length} — ${dlPct(servN, R.length)} строк</div>
+    </div></div>` +
+    dlTable(
+      [{t:'Служба'},{t:'Доставок',r:1},{t:'Расход',r:1},{t:'Сумма заказов',r:1},{t:'Доля',r:1},{t:'Ср. расход',r:1}],
+      byS.map(s => ({ cells: [
+        s.k, s.n, dlMoney(s.sum), s.pn ? dlMoney(s.osum) : '—',
+        s.k === '(не указано)' ? 'не считается' : dlPct(s.psum, s.osum),
+        dlMoney(s.sum / s.n)
+      ], __dim: s.k === '(не указано)' })),
+      ['Итого', R.length, dlMoney(sum), dlMoney(osum), dlPct(psum, osum), dlMoney(sum / R.length)]
+    ) + `</div>`;
+
+  // ── по филиалам ──
+  const byB = dlGroup(R, r => r.br).sort(dlSort);
+  const maxShare = Math.max(...byB.filter(b => b.osum > 0).map(b => b.psum / b.osum), 0.0001);
+  html += `<div class="card"><div class="card-head"><div>
+      <div class="card-title">🏪 По филиалам</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:2px;">
+        филиал указан у ${brN} из ${R.length} — ${dlPct(brN, R.length)} строк</div>
+    </div></div>` +
+    dlTable(
+      [{t:'Филиал'},{t:'Доставок',r:1},{t:'Расход',r:1},{t:'Сумма заказов',r:1},{t:'Доля',r:1},{t:'Ср. расход',r:1},{t:''}],
+      byB.map(b => ({ cells: [
+        b.k, b.n, dlMoney(b.sum), b.pn ? dlMoney(b.osum) : '—',
+        b.k === '(не указано)' ? 'не считается' : dlPct(b.psum, b.osum),
+        dlMoney(b.sum / b.n),
+        b.osum > 0 && b.k !== '(не указано)'
+          ? `<span style="display:block;height:6px;border-radius:3px;background:var(--a2);width:${
+              Math.max(3, Math.round((b.psum / b.osum) / maxShare * 100))}px;"></span>` : ''
+      ], __dim: b.k === '(не указано)' })),
+      ['Итого', R.length, dlMoney(sum), dlMoney(osum), dlPct(psum, osum), dlMoney(sum / R.length), '']
+    ) + `</div>`;
+
+  // ── по типу ──
+  const byT = dlGroup(R, r => r.type).sort(dlSort);
+  html += `<div class="card"><div class="card-head"><div>
+      <div class="card-title">🎁 По типу доставки</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:2px;">
+        «Бесплатная доставка» и «Беспалтная доставка» — одно и то же, считаются вместе</div>
+    </div></div>` +
+    dlTable(
+      [{t:'Тип'},{t:'Доставок',r:1},{t:'Расход',r:1},{t:'Доля в расходе',r:1},{t:'Сумма заказов',r:1},{t:'Доля',r:1}],
+      byT.map(t => ({ cells: [
+        t.k, t.n, dlMoney(t.sum), dlPct(t.sum, sum),
+        t.pn ? dlMoney(t.osum) : '—', t.pn ? dlPct(t.psum, t.osum) : '—'
+      ] })),
+      ['Итого', R.length, dlMoney(sum), '100,00 %', dlMoney(osum), dlPct(psum, osum)]
+    ) + `</div>`;
+
+  // ── чего в цифрах нет ──
+  const gaps = [];
+  if (servN < R.length) gaps.push(`<b>Служба не указана у ${plural(R.length - servN, 'доставки', 'доставок', 'доставок')}</b> — это ${
+    dlMoney(R.filter(r => !r.serv).reduce((a, b) => a + b.sum, 0))}, или ${
+    dlPct(R.filter(r => !r.serv).reduce((a, b) => a + b.sum, 0), sum)} всех расходов. Сравнивать службы по таким данным нельзя.`);
+  if (brN < R.length) gaps.push(`<b>Филиал не указан у ${plural(R.length - brN, 'доставки', 'доставок', 'доставок')}</b> — ${
+    dlMoney(R.filter(r => !r.br).reduce((a, b) => a + b.sum, 0))}, или ${
+    dlPct(R.filter(r => !r.br).reduce((a, b) => a + b.sum, 0), sum)} расходов.`);
+  if (paired.length < R.length) gaps.push(`<b>Сумма заказа не указана у ${plural(R.length - paired.length, 'доставки', 'доставок', 'доставок')}</b> — расход по ним ${
+    dlMoney(sum - psum)}. Эти доставки в долю не входят.`);
+  if (numN < R.length) gaps.push(`<b>Номер заказа есть только у ${numN} из ${R.length}</b>. Без номера расход не сверить с отчётом 0080 автоматически.`);
+  const small = byM.filter(m => m.n < 5 && m.n > 0);
+  if (small.length) gaps.push(`<b>Мало данных:</b> ${small.map(m => dlMonthTitle(m.k) + ' — ' + plural(m.n, 'доставка', 'доставки', 'доставок')).join(', ')
+    }. По таким месяцам выводов не делают.`);
+
+  if (gaps.length) html += `<div class="card"><div class="card-head"><div>
+      <div class="card-title">⚠️ Чего в этих цифрах нет</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:2px;">
+        каждый пункт ограничивает то, что можно утверждать по отчёту</div>
+    </div></div>
+    <ul style="margin:0;padding-left:20px;font-size:13px;line-height:1.6;">
+      ${gaps.map(x => '<li style="margin:6px 0;">' + x + '</li>').join('')}
+    </ul></div>`;
+
+  out.innerHTML = html;
 }
 
 // ══════════════════════════════════════════════════
