@@ -1184,12 +1184,14 @@ function tgParseDate_(t) {
 
 function tgSaveRow_(chat, st, link) {
   const headers = ['Дата', 'Время', 'Дата перевода', 'Время перевода', '№ заказа',
-                   'Сумма курьеру, ₸', 'Сумма заказа, ₸',
+                   'Сумма курьеру, ₸', 'Сумма заказа, ₸', 'Сумма доставки, ₸', 'Заказ без доставки, ₸',
                    'Служба', 'Кто прислал', 'Чек', 'Чат'];
   const sheet = getOrCreateSheet(SHEET_RECEIPTS, headers);
   // Лист мог появиться раньше этих колонок — дописываем их на место
   ensureColumn(sheet, 'Дата перевода', 2);
   ensureColumn(sheet, 'Время перевода', 3);
+  ensureColumnAfterName(sheet, 'Сумма доставки, ₸', 'Сумма заказа, ₸');
+  ensureColumnAfterName(sheet, 'Заказ без доставки, ₸', 'Сумма доставки, ₸');
   const tz = SpreadsheetApp.openById(SHEET_ID).getSpreadsheetTimeZone();
   const now = new Date();
   const cell = /^https?:\/\//.test(String(link))
@@ -1331,6 +1333,63 @@ function getUploads() {
     out.push(o);
   }
   return { status: 'ok', data: out.slice(-50) };
+}
+
+// ══════════════════════════════════════════════════════════
+//  РАЗБИВКА СУММЫ ЗАКАЗА В ЛИСТЕ «ЧЕКИ КУРЬЕРАМ»
+//  «Сумма заказа» — итог, как его видит клиент: товары плюс доставка.
+//  Рядом две колонки из отчёта 0080: сколько в этом итоге доставки
+//  и сколько остаётся на товары. Заполняется по номеру заказа,
+//  поэтому строки без номера остаются пустыми.
+//  Запускать можно сколько угодно раз — пересчитывает заново.
+// ══════════════════════════════════════════════════════════
+function fillOrderBreakdown() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const rec = ss.getSheetByName(SHEET_RECEIPTS);
+  const ord = ss.getSheetByName(SHEET_ORDERS);
+  if (!rec) return tell_('Нет листа «' + SHEET_RECEIPTS + '».');
+  if (!ord || ord.getLastRow() < 2) return tell_('Лист «' + SHEET_ORDERS + '» пуст — загрузите отчёт 0080.');
+
+  ensureColumnAfterName(rec, 'Сумма доставки, ₸', 'Сумма заказа, ₸');
+  ensureColumnAfterName(rec, 'Заказ без доставки, ₸', 'Сумма доставки, ₸');
+
+  // Заказы по номеру: итог и доставка внутри него
+  const ov = ord.getRange(1, 1, ord.getLastRow(), ord.getLastColumn()).getValues();
+  const oh = ov[0].map(String);
+  const cNum = oh.indexOf('Номер'), cSum = oh.indexOf('Сумма, ₸'), cDel = oh.indexOf('Доставка, ₸');
+  if (cNum < 0 || cSum < 0 || cDel < 0) return tell_('В листе «' + SHEET_ORDERS + '» не хватает колонок.');
+  const byNum = {};
+  for (let i = 1; i < ov.length; i++) {
+    const n = String(ov[i][cNum] || '').replace(/^'/, '').trim();
+    if (n) byNum[n] = { sum: Number(ov[i][cSum]) || 0, deliv: Number(ov[i][cDel]) || 0 };
+  }
+
+  const last = rec.getLastRow();
+  if (last < 2) return tell_('В листе «' + SHEET_RECEIPTS + '» нет строк.');
+  const rh = rec.getRange(1, 1, 1, rec.getLastColumn()).getValues()[0].map(String);
+  const kNum = rh.indexOf('№ заказа') + 1;
+  const kTot = rh.indexOf('Сумма заказа, ₸') + 1;
+  const kDel = rh.indexOf('Сумма доставки, ₸') + 1;
+  const kNet = rh.indexOf('Заказ без доставки, ₸') + 1;
+  if (!kNum || !kTot || !kDel || !kNet) return tell_('В листе «' + SHEET_RECEIPTS + '» не хватает колонок.');
+
+  let done = 0, skip = 0, lost = 0, fixed = [];
+  for (let r = 2; r <= last; r++) {
+    const num = String(rec.getRange(r, kNum).getValue() || '').replace(/^'/, '').trim();
+    if (!num) { skip++; continue; }
+    const o = byNum[num];
+    if (!o) { lost++; continue; }
+    const was = Number(rec.getRange(r, kTot).getValue()) || 0;
+    const tot = Math.round(o.sum * 100) / 100;
+    if (Math.round(was) !== Math.round(tot)) fixed.push(r + ': ' + was + ' → ' + tot);
+    rec.getRange(r, kTot).setValue(tot);
+    rec.getRange(r, kDel).setValue(Math.round(o.deliv * 100) / 100);
+    rec.getRange(r, kNet).setValue(Math.round((o.sum - o.deliv) * 100) / 100);
+    done++;
+  }
+  return tell_('Разбито строк: ' + done + '. Без номера: ' + skip +
+               '. Номер не найден в 0080: ' + lost +
+               (fixed.length ? '.\nИтог заказа поправлен в строках — ' + fixed.join('; ') : '.'));
 }
 
 // ══════════════════════════════════════════════════════════

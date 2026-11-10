@@ -1451,7 +1451,11 @@ async function dlLoad(force) {
     dlRows = (j.data || []).map(x => ({
       date:  un(x['Дата перевода']) || un(x['Дата']),
       sum:   numOrZero(x['Сумма курьеру, ₸']),
-      osum:  numOrZero(x['Сумма заказа, ₸']),
+      // Доля считается от товаров: итог заказа включает саму доставку,
+      // и делить расход на него — значит занижать долю
+      osum:  numOrZero(x['Заказ без доставки, ₸']) || numOrZero(x['Сумма заказа, ₸']),
+      ototal:numOrZero(x['Сумма заказа, ₸']),
+      odeliv:numOrZero(x['Сумма доставки, ₸']),
       serv:  un(x['Служба']),
       br:    un(x['Филиал']).toUpperCase(),
       addr:  un(x['Адрес']),
@@ -5763,7 +5767,7 @@ async function rcLoad() {
       sentAt:  un(x['Дата']) + ' ' + un(x['Время']),
       num:     un(x['№ заказа']),
       toCour:  numOrZero(x['Сумма курьеру, ₸']),
-      orderSum:numOrZero(x['Сумма заказа, ₸']),
+      orderSum:numOrZero(x['Заказ без доставки, ₸']) || numOrZero(x['Сумма заказа, ₸']),
       service: un(x['Служба']),
       branch:  un(x['Филиал']),
       addr:    un(x['Адрес']),
