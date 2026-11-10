@@ -1404,6 +1404,30 @@ function go(id) {
 //  время вручения. Колонки в шапке разделены широкими пробелами,
 //  поэтому строки собираем по координатам, а не по порядку слов.
 // ══════════════════════════════════════════════════
+// Точки компании, как их пишет Wolt. Коды филиалов и назначение адресов —
+// со слов колл-центра. Нужны, чтобы отличить доставку клиенту от перевозки
+// между своими: последняя не расход на доставку, а внутренняя логистика.
+const WD_POINTS = [
+  { re: /сарыарка/i,                 name: 'ТТ2 · Рынок «Сарыарка»',   kind: 'филиал' },
+  { re: /бесагаш/i,                  name: 'ТТ9 · Бесагаш',            kind: 'филиал' },
+  { re: /alem\s*city/i,              name: 'ТТ10 · Alem City',         kind: 'филиал' },
+  { re: /черепанова\s*(улица\s*)?14/i, name: 'Цех · Черепанова 14а',   kind: 'цех' },
+  { re: /сатпаева\s*90\/4/i,         name: 'Корпоративные · Сатпаева 90/4', kind: 'корпоративная' },
+  { re: /шарипова\s*145/i,           name: 'Ади Шарипова 145к2',       kind: 'филиал' },
+  // У филиала Wolt пишет улицу без дома: «улица Ньютона, 050000, Алматы».
+  // Поэтому требуем запятую или дом 1а — иначе под правило попадёт клиент,
+  // который просто живёт на Ньютона.
+  { re: /ньютона\s*(1а\b|,|$)/i,     name: 'Ньютона 1а',               kind: 'филиал' },
+  { re: /тимирязева\s*38/i,          name: 'Тимирязева 38/1',          kind: 'филиал' },
+  { re: /сатпаева\s*90\/21/i,        name: 'Сатпаева 90/21',           kind: 'филиал' },
+  { re: /щепкина\s*35/i,             name: 'Щепкина 35б',              kind: 'филиал' },
+  { re: /райымбек[а-яё]*\s*(батыра\s*)?168/i, name: 'Райымбек батыра 168Б', kind: 'филиал' },
+  { re: /шугыла|шұғыла/i,            name: 'Шугыла 340/35 к15',        kind: 'филиал' },
+  { re: /алтын\s*орда|алма\s*сити|alma\s*city/i, name: 'Алма City 5 · Алтын Орда 6/40а', kind: 'филиал' },
+  { re: /микрорайон[\s-]*28\/1|4\s*мкр|4-?й?\s*микрорайон/i, name: '4-й микрорайон 28/1', kind: 'филиал' }
+];
+const wdPoint = s => WD_POINTS.find(p => p.re.test(String(s || ''))) || null;
+
 const RE_WD_HEAD = /^#(\d+)\s+(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})\s+(.*)$/;
 const RE_WD_MONEY = /([\d][\d\s ]*,\d{2})\s*KZT/g;
 const RE_WD_PHONE = /\+?7\s?\d[\d\s-]{8,}\d/;
@@ -1811,8 +1835,12 @@ function renderDelivery() {
     // Определяем по получателю — в Wolt там пишут «Тəп-Тəтті, 4мкр 28/1»,
     // «Диспетчер», «Офис», название филиала. Такие рейсы нельзя считать
     // расходом на доставку клиентам: это внутренняя логистика.
-    const isCorp = w => /тәп|тəп|тэп|тап[\s-]?тат|tap[\s-]?tat|диспетчер|офис|склад|цех|алма\s*сити|alma\s*city|alem\s*city/i
-      .test(w.who || '');
+    // Везут не клиенту, если получатель — своя точка по имени
+    // («Тəп-Тəтті, 4мкр 28/1», «Диспетчер», «Офис») или если адрес
+    // доставки сам является точкой компании из справочника выше.
+    const isCorp = w =>
+      /тәп|тəп|тэп|тап[\s-]?тат|tap[\s-]?tat|диспетчер|офис|склад|цех/i.test(w.who || '') ||
+      !!wdPoint(w.to);
     const phOf = s => String(s || '').replace(/\D/g, '').slice(-10);
     const ordByPhone = {};
     O.forEach(o => { const k = phOf(o.phone); if (k) (ordByPhone[k] = ordByPhone[k] || []).push(o); });
@@ -1856,12 +1884,15 @@ function renderDelivery() {
     // Откуда забирают: видно, какие точки вообще гоняют Wolt
     const byFrom = {};
     dlWolt.forEach(w => {
-      const k = (w.from || '(не указано)').replace(/,\s*\d{6},?/, ',').replace(/,\s*Алматы$/, '');
-      (byFrom[k] = byFrom[k] || { k, n: 0, sum: 0, corp: 0, days: new Set() });
+      const p = wdPoint(w.from);
+      const k = p ? p.name
+                  : (w.from || '(не указано)').replace(/,\s*\d{6},?/, ',').replace(/,\s*Алматы$/, '');
+      (byFrom[k] = byFrom[k] || { k, kind: p ? p.kind : '', n: 0, sum: 0, corp: 0, days: new Set() });
       byFrom[k].n++; byFrom[k].sum += w.cost; byFrom[k].days.add(w.date);
       if (isCorp(w)) byFrom[k].corp++;
     });
     const froms = Object.values(byFrom).sort((a, b) => b.sum - a.sum);
+    const unknown = froms.filter(f => !f.kind);
 
     // Заказы Wolt без доставки в списке — за те дни, что загружены
     const wDays = new Set(dlWolt.map(w => w.date));
@@ -1933,16 +1964,18 @@ function renderDelivery() {
     if (froms.length > 1) html += `<div class="card" style="box-shadow:none;border:none;padding:0;margin:14px 0 0;">
       <div style="font-size:13px;font-weight:700;margin-bottom:6px;">Откуда забирают</div>` +
       dlTable(
-        [{t:'Точка'},{t:'Рейсов',r:1},{t:'Из них служебных',r:1},{t:'Дней',r:1},{t:'Сумма',r:1}],
+        [{t:'Точка'},{t:'Что это'},{t:'Рейсов',r:1},{t:'Между своими',r:1},{t:'Дней',r:1},{t:'Сумма',r:1}],
         froms.map(f => ({ cells: [
-          f.k, String(f.n), f.corp ? String(f.corp) : '—', String(f.days.size), dlMoney(f.sum)
+          f.k, f.kind || '<span style="color:var(--red);">не в справочнике</span>',
+          String(f.n), f.corp ? String(f.corp) : '—', String(f.days.size), dlMoney(f.sum)
         ] })),
-        ['Итого', String(dlWolt.length), String(froms.reduce((s, f) => s + f.corp, 0)), '',
+        ['Итого', '', String(dlWolt.length), String(froms.reduce((s, f) => s + f.corp, 0)), '',
          dlMoney(sumOf(dlWolt))]
       ) +
       `<div style="font-size:11px;color:var(--text3);margin-top:6px;">
-        Служебный рейс — тот, где получатель не клиент, а своя точка, диспетчер или офис.
-        Если в списке есть адрес, который не филиал, значит оттуда тоже вызывают Wolt.</div></div>`;
+        «Между своими» — рейсы, где везли не клиенту, а на свою точку, в цех, диспетчеру или в офис.
+        ${unknown.length ? 'Красным — адреса, которых нет в справочнике точек: скажите, что это, и они встанут на место.'
+                         : 'Все точки опознаны.'}</div></div>`;
 
     if (noDrive.length) html += `<div class="status-box s-warn" style="margin-top:12px;">
       <div class="s-icon">❓</div><div>
