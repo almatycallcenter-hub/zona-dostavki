@@ -748,6 +748,7 @@ details[open] > summary .chev { transform:rotate(90deg); }
                 <div style="font-size:11px;color:var(--text3);margin-top:3px;">«Отчёт по доставкам» в .xlsx — сопоставим заказы с кассой</div>
               </div>
               <input type="file" id="iikoFile" accept=".xlsx,.xls" style="display:none;">
+              <div id="iikoSaveMsg" style="font-size:11px;margin-top:6px;"></div>
             </div>
 
             <div id="iikoWarn" style="display:none;font-size:12px;background:var(--ybg);color:var(--yellow);border-radius:8px;padding:10px 12px;margin-bottom:12px;"></div>
@@ -2007,12 +2008,65 @@ function initIikoUpload() {
         <div style="font-size:11px;color:var(--text3);margin-top:4px;">нажмите, чтобы загрузить другой</div>`;
       window._iikoManual = false;
       renderIiko();
+      ordersSave(iikoOrders, iikoPeriod, f.name);
     } catch (err) {
       iikoOrders = [];
       z.className = 'upload-zone';
       z.innerHTML = `<div style="font-size:22px;">❌</div><div style="font-size:13px;font-weight:600;">Не удалось прочитать отчёт</div><div style="font-size:11px;color:var(--red);margin-top:4px;">${err.message}</div>`;
     }
   });
+}
+
+// ── Сохранение отчёта 0080 в таблицу ───────────────
+// Операторы грузят отчёт каждый день, иногда по нескольку раз.
+// В таблице заказ живёт одной строкой: повторная загрузка её переписывает,
+// поэтому там всегда последняя версия. Файл никуда не копируется —
+// хранятся сами доставки, с ними и работает аналитика.
+function ordersPack(list) {
+  return list.map(o => ({
+    num: o.num,
+    uch: o.uchDate || '',
+    openDate: o.openDate || '',
+    openTime: (o.openTime || '').slice(0, 5),
+    oper: o.oper || '',
+    courier: o.courier || '',
+    dtype: o.dtype || '',
+    client: o.client || '',
+    phone: o.phone || o.phoneD || '',
+    addr: o.addr || '',
+    comment: o.comment || '',
+    sum: Math.round((o.sum || 0) * 100) / 100,
+    deliv: Math.round((o.items || []).filter(i => /достав/i.test(i.dish || ''))
+                      .reduce((s, i) => s + (i.sum || 0), 0) * 100) / 100,
+    items: (o.items || []).filter(i => !/достав/i.test(i.dish || '')).length
+  })).filter(o => o.num);
+}
+
+async function ordersSave(list, period, fileName, silent) {
+  const url = ls('scriptUrl');
+  const box = document.getElementById('iikoSaveMsg');
+  const say = (txt, cls) => { if (box) box.innerHTML =
+    `<span style="color:var(--${cls || 'text3'});">${txt}</span>`; };
+  if (!url) { say('Доставки не сохранены: не настроен Google Sheets в ⚙️ Настройках.', 'yellow'); return; }
+  const pack = ordersPack(list);
+  if (!pack.length) { say('В отчёте нет доставок с номером — сохранять нечего.', 'yellow'); return; }
+  say('⏳ Сохраняем ' + plural(pack.length, 'доставку', 'доставки', 'доставок') + '…');
+  try {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        type: 'orders', orders: pack, file: fileName || '',
+        from: (period && period.from) || '', to: (period && period.to) || '',
+        who: (document.getElementById('rOp') || {}).value || ''
+      })
+    });
+    const j = await r.json();
+    if (j.status !== 'ok') throw new Error(j.message || 'таблица ответила ошибкой');
+    say(`✅ Сохранено: новых ${j.added}, обновлено ${j.updated}. Всего в таблице ${j.total}.`, 'green');
+  } catch (e) {
+    say('Не вышло сохранить доставки: ' + e.message + '. Отчёт на экране это не ломает.', 'red');
+  }
 }
 
 // ── Авторазметка по данным iiko ────────────────────

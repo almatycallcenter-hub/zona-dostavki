@@ -18,6 +18,8 @@ const SHEET_ID = 'ВСТАВЬТЕ_ID_ТАБЛИЦЫ_СЮДА';
 const SHEET_SHIFTS       = 'Смены';
 const SHEET_TRANSACTIONS = 'Транзакции';
 const SHEET_RECEIPTS     = 'Чеки курьерам';
+const SHEET_ORDERS       = 'Доставки 0080';
+const SHEET_UPLOADS      = 'Загрузки 0080';
 
 // ════════════════════════════════════════════════════════════
 //  GET — получение данных (история смен)
@@ -58,6 +60,14 @@ function doGet(e) {
       lastError: PropertiesService.getScriptProperties().getProperty('TG_LASTERR') || '' });
   }
 
+  if (action === 'getOrders') {
+    return jsonResponse(getOrders(e.parameter.from || '', e.parameter.to || ''));
+  }
+
+  if (action === 'getUploads') {
+    return jsonResponse(getUploads());
+  }
+
   if (action === 'getReceipts') {
     return jsonResponse(getReceipts(e.parameter.from || '', e.parameter.to || ''));
   }
@@ -91,6 +101,10 @@ function doPost(e) {
     if (data.type === 'transactions') {
       saveTransactions(data);
       return jsonResponse({ status: 'ok', message: 'Транзакции сохранены' });
+    }
+
+    if (data.type === 'orders') {
+      return jsonResponse(saveOrders(data));
     }
 
     if (data.type === 'shot') {
@@ -1216,6 +1230,107 @@ function getReceipts(from, to) {
     out.push(o);
   }
   return { status: 'ok', data: out };
+}
+
+
+// ══════════════════════════════════════════════════════════
+//  ОТЧЁТ 0080: храним доставки, а не файлы
+//  Операторы грузят отчёт каждый день, иногда по нескольку раз.
+//  Ключ — номер доставки: повторная загрузка переписывает строку,
+//  поэтому в листе всегда последняя версия заказа.
+// ══════════════════════════════════════════════════════════
+const ORDERS_HEAD = ['Номер', 'Учетный день', 'Дата открытия', 'Время открытия',
+                     'Оператор', 'Курьер', 'Тип доставки', 'Клиент', 'Телефон',
+                     'Адрес', 'Комментарий', 'Сумма, ₸', 'Доставка, ₸', 'Позиций',
+                     'Обновлено', 'Файл'];
+
+function saveOrders(data) {
+  const list = data.orders || [];
+  if (!list.length) return { status: 'error', message: 'в отчёте нет доставок' };
+
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const tz = ss.getSpreadsheetTimeZone();
+  const now = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd HH:mm');
+  const file = String(data.file || '').slice(0, 120);
+
+  const sheet = getOrCreateSheet(SHEET_ORDERS, ORDERS_HEAD);
+  const last = sheet.getLastRow();
+  const cols = ORDERS_HEAD.length;
+
+  // Читаем всё, что есть, и собираем по номеру
+  const byNum = {};
+  const order = [];
+  if (last > 1) {
+    const vals = sheet.getRange(2, 1, last - 1, cols).getValues();
+    vals.forEach(function (r) {
+      const n = String(r[0] || '').replace(/^'/, '').trim();
+      if (!n) return;
+      if (!(n in byNum)) order.push(n);
+      byNum[n] = r;
+    });
+  }
+
+  let added = 0, updated = 0;
+  list.forEach(function (o) {
+    const n = String(o.num || '').trim();
+    if (!n) return;
+    const row = ["'" + n, "'" + (o.uch || ''), "'" + (o.openDate || ''), "'" + (o.openTime || ''),
+                 o.oper || '', o.courier || '', o.dtype || '', o.client || '', "'" + (o.phone || ''),
+                 o.addr || '', o.comment || '', Number(o.sum || 0), Number(o.deliv || 0),
+                 Number(o.items || 0), now, file];
+    if (n in byNum) updated++; else { order.push(n); added++; }
+    byNum[n] = row;
+  });
+
+  // Пишем обратно одним куском: по дню, потом по номеру
+  const out = order.map(function (n) { return byNum[n]; })
+    .sort(function (a, b) {
+      const da = String(a[1] || ''), db = String(b[1] || '');
+      return da === db ? String(a[0]).localeCompare(String(b[0])) : da.localeCompare(db);
+    });
+  if (last > 1) sheet.getRange(2, 1, last - 1, cols).clearContent();
+  if (out.length) sheet.getRange(2, 1, out.length, cols).setValues(out);
+
+  // Журнал загрузок: видно, кто и когда грузил и что изменилось
+  const log = getOrCreateSheet(SHEET_UPLOADS,
+    ['Когда', 'Файл', 'Период с', 'Период по', 'В файле', 'Новых', 'Обновлено', 'Кто']);
+  log.appendRow([now, file, "'" + (data.from || ''), "'" + (data.to || ''),
+                 list.length, added, updated, data.who || '']);
+
+  return { status: 'ok', total: out.length, added: added, updated: updated };
+}
+
+function getOrders(from, to) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_ORDERS);
+  if (!sheet || sheet.getLastRow() < 2) return { status: 'ok', data: [] };
+  const vals = sheet.getRange(1, 1, sheet.getLastRow(), sheet.getLastColumn()).getValues();
+  const head = vals[0].map(String);
+  const out = [];
+  for (let i = 1; i < vals.length; i++) {
+    const o = {};
+    head.forEach(function (h, c) { o[h] = normalizeCell(h, vals[i][c]); });
+    const d = String(o['Учетный день'] || '').replace(/^'/, '');
+    if (from && d < from) continue;
+    if (to && d > to) continue;
+    out.push(o);
+  }
+  return { status: 'ok', data: out };
+}
+
+function getUploads() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_UPLOADS);
+  if (!sheet || sheet.getLastRow() < 2) return { status: 'ok', data: [] };
+  const vals = sheet.getRange(1, 1, sheet.getLastRow(), sheet.getLastColumn()).getValues();
+  const head = vals[0].map(String);
+  const out = [];
+  for (let i = 1; i < vals.length; i++) {
+    const o = {};
+    head.forEach(function (h, c) { o[h] = normalizeCell(h, vals[i][c]); });
+    out.push(o);
+  }
+  return { status: 'ok', data: out.slice(-50) };
 }
 
 // ══════════════════════════════════════════════════════════
