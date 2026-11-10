@@ -1519,11 +1519,17 @@ function renderDelivery() {
   const cour = O.filter(o => !o.pickup);              // курьером
   const pick = O.filter(o => o.pickup);               // самовывоз
   const sum  = R.reduce((a, b) => a + b.sum, 0);      // сколько отдали курьерам
-  const courSum = cour.reduce((a, b) => a + b.goods, 0);
+  // Wolt выставляет счёт раз в месяц, переводом его не оплачивают —
+  // значит и чека по нему быть не может, и в долю по чекам он не входит
+  const isWolt = o => /wolt/i.test(o.courier || '');
+  const kaspi = cour.filter(o => !isWolt(o));         // Яндекс, Индрайвер, свой курьер
+  const wolt  = cour.filter(isWolt);
+  const courSum = kaspi.reduce((a, b) => a + b.goods, 0);
+  const woltSum = wolt.reduce((a, b) => a + b.goods, 0);
   const byNum = {}; O.forEach(o => { byNum[o.num] = o; });
 
   // Чек обязателен там, где доставка бесплатная: её оплачивает компания
-  const needsR = o => !o.pickup && o.goods >= freeFrom(o.date);
+  const needsR = o => !o.pickup && !isWolt(o) && o.goods >= freeFrom(o.date);
   const need = cour.filter(needsR);
   const haveNum = {}; R.forEach(r => { if (r.num) haveNum[r.num] = true; });
   const covered = need.filter(o => haveNum[o.num]);
@@ -1542,19 +1548,20 @@ function renderDelivery() {
       <div class="kpi"><div class="kpi-label">Доставки курьером</div>
         <div class="kpi-val">${cour.length}</div>
         <div class="kpi-sub">из ${O.length} заказов · самовывоз ${pick.length}</div></div>
-      <div class="kpi"><div class="kpi-label">Сумма этих заказов</div>
-        <div class="kpi-val">${dlMoney(courSum)}</div>
-        <div class="kpi-sub">товары, без услуги доставки</div></div>
-      <div class="kpi g"><div class="kpi-label">Отдали курьерам</div>
+      <div class="kpi"><div class="kpi-label">Через Wolt</div>
+        <div class="kpi-val">${wolt.length}</div>
+        <div class="kpi-sub">на ${dlMoney(woltSum)} · оплата по счёту, не переводом</div></div>
+      <div class="kpi g"><div class="kpi-label">Отдали переводом</div>
         <div class="kpi-val">${dlMoney(sum)}</div>
         <div class="kpi-sub">${plural(R.length, 'чек', 'чека', 'чеков')} и переносов</div></div>
-      <div class="kpi y"><div class="kpi-label">Доля доставки</div>
+      <div class="kpi y"><div class="kpi-label">Доля без Wolt</div>
         <div class="kpi-val">${dlPct(sum, courSum)}</div>
-        <div class="kpi-sub">от суммы курьерских заказов</div></div>
+        <div class="kpi-sub">от ${dlMoney(courSum)} заказов Яндекса и Индрайвера</div></div>
     </div>
     <div style="font-size:11.5px;color:var(--text3);margin-top:10px;">
       Заказы ${dates.length ? dlFull(dates[0]) + ' — ' + dlFull(dates[dates.length - 1]) : '—'} из отчёта 0080.
-      Самовывоз в расчёт доли не входит: курьера по нему не оплачивают.
+      Самовывоз в долю не входит: курьера по нему не оплачивают. Wolt тоже:
+      он выставляет счёт за месяц, и его стоимости в чеках нет — она в разделе «Аналитика».
     </div>
   </div>`;
 
@@ -1563,13 +1570,14 @@ function renderDelivery() {
     O.map(o => o.date.slice(0, 7)).concat(R.map(r => r.date.slice(0, 7))).filter(Boolean)
   )].sort();
   const mRows = months.map(m => {
-    const oc = cour.filter(o => o.date.slice(0, 7) === m);
+    const oc = kaspi.filter(o => o.date.slice(0, 7) === m);
+    const ow = wolt.filter(o => o.date.slice(0, 7) === m);
     const rc = R.filter(r => r.date.slice(0, 7) === m);
     const nd = oc.filter(needsR);
     const cv = nd.filter(o => haveNum[o.num]).length;
     const g2 = oc.reduce((a, b) => a + b.goods, 0);
     const s2 = rc.reduce((a, b) => a + b.sum, 0);
-    return { m, n: oc.length, goods: g2, spent: s2, nd: nd.length, cv, rc: rc.length };
+    return { m, n: oc.length, w: ow.length, goods: g2, spent: s2, nd: nd.length, cv, rc: rc.length };
   });
   html += `<div class="card"><div class="card-head"><div>
       <div class="card-title">📅 По месяцам</div>
@@ -1577,14 +1585,14 @@ function renderDelivery() {
         слева — что показывает 0080, справа — что подтверждено чеками</div>
     </div></div>` +
     dlTable(
-      [{t:'Месяц'},{t:'Курьером',r:1},{t:'Сумма заказов',r:1},{t:'Отдали курьерам',r:1},
+      [{t:'Месяц'},{t:'Яндекс и Индрайвер',r:1},{t:'Wolt',r:1},{t:'Сумма заказов',r:1},{t:'Отдали переводом',r:1},
        {t:'Доля',r:1},{t:'Нужен чек',r:1},{t:'Есть чек',r:1}],
       mRows.map(x => ({ cells: [
-        dlMonthTitle(x.m), x.n, dlMoney(x.goods), dlMoney(x.spent),
+        dlMonthTitle(x.m), x.n, x.w, dlMoney(x.goods), dlMoney(x.spent),
         x.goods > 0 ? dlPct(x.spent, x.goods) : '—',
         x.nd, x.cv + (x.nd && x.cv < x.nd ? ' <span style="color:var(--red);">(−' + (x.nd - x.cv) + ')</span>' : '')
       ], __dim: !x.n })),
-      ['Итого', cour.length, dlMoney(courSum), dlMoney(sum), dlPct(sum, courSum),
+      ['Итого', kaspi.length, wolt.length, dlMoney(courSum), dlMoney(sum), dlPct(sum, courSum),
        need.length, covered.length]
     ) + `</div>`;
 
@@ -1626,6 +1634,34 @@ function renderDelivery() {
         dlMoney(r.sum)).join('<br>')}${orphan.length > 20 ? '<br>…и ещё ' + (orphan.length - 20) : ''}</div>
     </div></div>`;
   html += `</div>`;
+
+  // ── кто вёз, по данным 0080 ──
+  const byCour = {};
+  cour.forEach(o => {
+    const k = o.courier || '(не указан)';
+    byCour[k] = byCour[k] || { k, n: 0, goods: 0, nd: 0, cv: 0 };
+    byCour[k].n++; byCour[k].goods += o.goods;
+    if (needsR(o)) { byCour[k].nd++; if (haveNum[o.num]) byCour[k].cv++; }
+  });
+  const courList = Object.values(byCour).sort((a, b) => b.n - a.n);
+  html += `<div class="card"><div class="card-head"><div>
+      <div class="card-title">🛵 Кто вёз</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:2px;">
+        по полю «Курьер» в отчёте 0080 — это факт, а не запись оператора</div>
+    </div></div>` +
+    dlTable(
+      [{t:'Курьер'},{t:'Доставок',r:1},{t:'Сумма заказов',r:1},{t:'Бесплатных',r:1},{t:'Есть чек',r:1}],
+      courList.map(c => ({ cells: [
+        c.k + (/wolt/i.test(c.k) ? ' <span style="color:var(--text3);">(счёт за месяц)</span>' : ''),
+        c.n, dlMoney(c.goods),
+        /wolt/i.test(c.k) ? '—' : c.nd,
+        /wolt/i.test(c.k) ? '—' : c.cv + (c.nd && c.cv < c.nd ? ' <span style="color:var(--red);">(−' + (c.nd - c.cv) + ')</span>' : '')
+      ] })),
+      ['Итого', cour.length, dlMoney(courSum + woltSum), need.length, covered.length]
+    ) + `<div style="font-size:11px;color:var(--text3);margin-top:8px;">
+      «Бесплатных» — заказы, где доставку не брали с клиента, значит её оплатила компания.
+      По Wolt чеков не бывает: он выставляет счёт за месяц.
+    </div></div>`;
 
   // ── по службам, из чеков ──
   const byS = dlGroup(R, r => r.serv).sort(dlSort);
@@ -1682,7 +1718,9 @@ function renderDelivery() {
   if (noComm) gaps.push(`<b>У ${plural(noComm, 'заказа', 'заказов', 'заказов')} филиал не читается</b> — оператор не написал его в комментарии.`);
   const emptyM = mRows.filter(x => x.n > 0 && x.rc === 0);
   if (emptyM.length) gaps.push(`<b>Месяцы без единого чека:</b> ${emptyM.map(x => dlMonthTitle(x.m)).join(', ')
-    }. Заказы курьером в эти месяцы были, а оплат не записано.`);
+    }. Заказы Яндекса и Индрайвера в эти месяцы были, а оплат не записано.`);
+  if (wolt.length) gaps.push(`<b>Стоимости Wolt здесь нет.</b> ${plural(wolt.length, 'доставка', 'доставки', 'доставок')
+    } на ${dlMoney(woltSum)} заказов везли через Wolt, он выставляет счёт за месяц. Его суммы — в разделе «Аналитика», блок «Счёт Wolt за месяц».`);
   if (gaps.length) html += `<div class="card"><div class="card-head"><div>
       <div class="card-title">⚠️ Чего в этих цифрах нет</div>
       <div style="font-size:11px;color:var(--text3);margin-top:2px;">
