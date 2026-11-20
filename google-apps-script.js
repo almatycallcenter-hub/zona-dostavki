@@ -177,17 +177,16 @@ function saveShot(data) {
 // ════════════════════════════════════════════════════════════
 //  Сохранение смены (upsert: обновляет если дата уже есть)
 // ════════════════════════════════════════════════════════════
+
 function saveShift(data) {
   const headers = [
     'Дата', 'Оператор', 'Итого Kaspi (₸)', 'Дневные (₸)', 'Доплаты (₸)',
     'Предоплаты сегодня (₸)', 'Предоплаты будущие (₸)',
     'Ожидаемый iiko (₸)', 'Фактический iiko (₸)', 'Расхождение iiko (₸)',
     'Кол-во транзакций', 'Статус сверки', 'Статус iiko', 'Комментарий',
-    'Время записи'
+    'Снимок', 'Время записи'
   ];
   const sheet = getOrCreateSheet(SHEET_SHIFTS, headers);
-  // Лист мог быть создан до появления доплат — тогда вставляем колонку,
-  // старые строки сами сдвигаются и получают пустую ячейку.
   ensureColumn(sheet, 'Доплаты (₸)', 4);
 
   const kaspi      = data.totalKaspi   || 0;
@@ -197,62 +196,86 @@ function saveShift(data) {
   const expIiko    = data.expectedIiko || 0;
   const actIiko    = data.actualIiko   || 0;
   const diffIiko   = actIiko > 0 ? actIiko - expIiko : '';
-
-  // Доплаты к заказам прошлых смен — такие же сегодняшние деньги,
-  // поэтому в балансе кассы они стоят рядом с дневными и предоплатами.
-  const extra = data.totalExtra || 0;
+  const extra      = data.totalExtra   || 0;
   const sverkaStatus = (kaspi === daily + (data.totalPrepay || 0) + extra)
     ? '✅ Сходится' : '❌ Расхождение';
   const iikoStatus = actIiko > 0
     ? (diffIiko === 0 ? '✅ Сходится' : '❌ ' + formatNum(Math.abs(diffIiko)) + ' ₸')
     : '—';
 
-  const newRow = [
-    asText(data.date),
-    data.operator    || '',
-    kaspi, daily, extra, prepToday, prepFuture, expIiko,
-    actIiko || '', diffIiko,
-    data.txnCount    || 0,
-    sverkaStatus, iikoStatus,
-    data.comment     || '',
-    new Date().toLocaleString('ru-RU')
-  ];
+  // Строку собираем по названиям колонок, а не по счёту:
+  // сколько бы колонок ни было в листе, длина совпадёт.
+  const head = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
+  const numCols = head.length;
+  const cShot = head.indexOf('Снимок');
+  const val = {
+    'Дата': String(data.date || ''),
+    'Оператор': data.operator || '',
+    'Итого Kaspi (₸)': kaspi,
+    'Дневные (₸)': daily,
+    'Доплаты (₸)': extra,
+    'Предоплаты сегодня (₸)': prepToday,
+    'Предоплаты будущие (₸)': prepFuture,
+    'Ожидаемый iiko (₸)': expIiko,
+    'Фактический iiko (₸)': actIiko || '',
+    'Расхождение iiko (₸)': diffIiko,
+    'Кол-во транзакций': data.txnCount || 0,
+    'Статус сверки': sverkaStatus,
+    'Статус iiko': iikoStatus,
+    'Комментарий': data.comment || '',
+    'Время записи': new Date().toLocaleString('ru-RU')
+  };
+  const newRow = head.map(h => h in val ? val[h] : '');
 
-  // Ищем существующую строку с такой же датой → заменяем, иначе добавляем
+  // Читаем старые строки; у «Снимка» берём формулу, иначе ссылка пропадёт
   const tz = SpreadsheetApp.openById(SHEET_ID).getSpreadsheetTimeZone();
-  const allRows = sheet.getDataRange().getValues();
-  let dataRows = allRows.slice(1);
+  const lastRowOld = sheet.getLastRow();
+  let dataRows = [];
+  if (lastRowOld > 1) {
+    const rng = sheet.getRange(2, 1, lastRowOld - 1, numCols);
+    const vals = rng.getValues();
+    const forms = rng.getFormulas();
+    dataRows = vals.map((r, i) => {
+      if (cShot >= 0 && forms[i][cShot]) r[cShot] = forms[i][cShot];
+      return r;
+    });
+  }
 
-  const idx = dataRows.findIndex(r => String(normalizeCell('Дата', r[0])) === String(data.date));
+  dataRows = dataRows.map(r => {
+    const raw = r[0];
+    r[0] = raw instanceof Date
+      ? Utilities.formatDate(raw, tz, 'yyyy-MM-dd')
+      : String(raw).replace(/^'/, '').trim();
+    return r;
+  }).filter(r => r[0]);
+
+  const idx = dataRows.findIndex(r => String(r[0]) === String(data.date));
   if (idx !== -1) {
+    if (cShot >= 0) newRow[cShot] = dataRows[idx][cShot];   // снимок за эту дату сохраняем
     dataRows[idx] = newRow;
   } else {
     dataRows.push(newRow);
   }
 
-  // Нормализуем дату (колонка 0) каждой строки → чистая текстовая строка yyyy-MM-dd
-  dataRows = dataRows.map(r => {
-    const raw = r[0];
-    const dateStr = raw instanceof Date
-      ? Utilities.formatDate(raw, tz, 'yyyy-MM-dd')
-      : String(raw).replace(/^'/, '').trim();
-    return [dateStr, ...r.slice(1)];
-  });
-
-  // Сортируем в JS по дате (ISO-строки сравниваются корректно)
   dataRows.sort((a, b) => String(a[0]).localeCompare(String(b[0])));
 
-  // Перезаписываем лист: очищаем старые данные, пишем отсортированные
-  const lastRowOld = sheet.getLastRow();
-  const numCols = sheet.getLastColumn();
-  if (lastRowOld > 1) {
-    sheet.getRange(2, 1, lastRowOld - 1, numCols).clearContent();
-  }
+  if (lastRowOld > 1) sheet.getRange(2, 1, lastRowOld - 1, numCols).clearContent();
   SpreadsheetApp.flush();
+  if (!dataRows.length) return;
 
-  if (dataRows.length > 0) {
-    const withPrefix = dataRows.map(r => ["'" + r[0], ...r.slice(1)]);
-    sheet.getRange(2, 1, withPrefix.length, withPrefix[0].length).setNumberFormat('@').setValues(withPrefix);
+  // Значения — текстом, как раньше; колонку «Снимок» пишем отдельно формулами
+  const out = dataRows.map(r => {
+    const row = r.slice();
+    row[0] = "'" + row[0];
+    if (cShot >= 0) row[cShot] = '';
+    return row;
+  });
+  sheet.getRange(2, 1, out.length, numCols).setNumberFormat('@').setValues(out);
+
+  if (cShot >= 0) {
+    const shotCol = sheet.getRange(2, cShot + 1, dataRows.length, 1);
+    shotCol.setNumberFormat('General');
+    shotCol.setValues(dataRows.map(r => [String(r[cShot] || '')]));
   }
 }
 
@@ -884,6 +907,16 @@ function shiftAllDatesBackward() {
 //  Токен и секрет лежат в свойствах скрипта, в коде их нет.
 // ════════════════════════════════════════════════════════════
 const TG_SERVICES = ['Wolt', 'Яндекс', 'Индрайвер', 'Свой курьер'];
+// Филиалы для кнопок — так же, как в выпадающем списке колонки «Филиал»
+const TG_BRANCHES = [['ТТ1', 'ТТ2', 'ТТ3', 'ТТ4'], ['ТТ6', 'ТТ8', 'ТТ9', 'ТТ10'], ['ТТ11', 'ЦЕХ']];
+function tgBranch_(s) {
+  const t = String(s || '').toUpperCase().replace(/\s+/g, '').replace(/T/g, 'Т');
+  if (/ЦЕХ/.test(t)) return 'ЦЕХ';
+  const m = t.match(/Т{1,2}(\d{1,2})/);
+  if (!m) return '';
+  const b = 'ТТ' + Number(m[1]);
+  return [].concat.apply([], TG_BRANCHES).indexOf(b) >= 0 ? b : '';
+}
 
 function tgCfg_() {
   const p = PropertiesService.getScriptProperties();
@@ -907,10 +940,18 @@ function tgApi_(method, payload) {
 
 function tgSend_(chat, text, keys) {
   const p = { chat_id: chat, text: text };
-  if (keys) p.reply_markup = { keyboard: keys.map(function (k) { return [{ text: k }]; }),
+  if (keys) p.reply_markup = { keyboard: keys.map(function (k) {
+                                 return Array.isArray(k) ? k.map(function (x) { return { text: x }; }) : [{ text: k }];
+                               }),
                                resize_keyboard: true, one_time_keyboard: true };
   else p.reply_markup = { remove_keyboard: true };
+  // Подсказку про исправление номера дописываем в одном месте, чтобы она
+  // стояла под каждым «Записала…», откуда бы его ни отправили
+  if (/^Записала/.test(String(text))) {
+    p.text = text + '\n\nОшиблись номером — ответьте на это сообщение правильным номером.';
+  }
   const r = tgApi_('sendMessage', p);
+  if (/^Записала/.test(String(text))) tgRememberMsg_(TG_LAST_ROW_, r);
   if (!r || !r.ok) Logger.log('sendMessage не ушло: ' + JSON.stringify(r));
   return r;
 }
@@ -957,7 +998,7 @@ function tgHandle_(u) {
     tgState_(chat, null);
     tgSend_(chat, 'Пришлите чек об оплате курьеру — фото или PDF.\n\n' +
                   'Быстрее всего — написать подписью к чеку: номер заказа, сумму курьеру и службу. ' +
-                  'Например: 4850 2550 wolt\n\n' +
+                  'Например: 4850 2550 wolt тт9 (филиал можно не писать — спрошу кнопками)\n\n' +
                   'Если подписи нет, спрошу всё по очереди. Написать «отмена» можно в любой момент.');
     return;
   }
@@ -989,18 +1030,23 @@ function tgHandle_(u) {
     if (cap && cap.service) {
       st0.order = cap.order; st0.sum = cap.sum;
       st0.osum = cap.osum; st0.service = cap.service;
+      st0.branch = cap.branch;
+      if (!st0.branch) {               // филиал в подписи не указан — спросим кнопками
+        st0.step = 'branch'; tgState_(chat, st0);
+        tgSend_(chat, 'Чек принял: № ' + cap.order + ', курьеру ' + tgMoney_(cap.sum) + ' ₸ · ' + cap.service + '.' +
+                      tgMismatch_(st0) + '\nКакой филиал?', TG_BRANCHES);
+        return;
+      }
       tgRename_(st0);
-      const row0 = tgSaveRow_(chat, st0, st0.link || '');
+      tgSaveRow_(chat, st0, st0.link || '');
       tgState_(chat, null);
-      const sent0 = tgSend_(chat, 'Записала.\n№ ' + st0.order + ' · курьеру ' + tgMoney_(st0.sum) + ' ₸' +
+      tgSend_(chat, 'Записала.\n№ ' + st0.order + ' · курьеру ' + tgMoney_(st0.sum) + ' ₸' +
               (st0.osum ? ' · заказ ' + tgMoney_(st0.osum) + ' ₸' : '') + ' · ' + st0.service +
-              tgMismatch_(st0) +
-              '\n\nОшиблись номером — ответьте на это сообщение правильным номером.');
-      tgRememberMsg_(row0, sent0);
+              tgMismatch_(st0));
       return;
     }
     if (cap) {
-      st0.order = cap.order; st0.sum = cap.sum; st0.osum = cap.osum; st0.step = 'service';
+      st0.order = cap.order; st0.sum = cap.sum; st0.osum = cap.osum; st0.branch = cap.branch; st0.step = 'service';
       tgState_(chat, st0);
       tgSend_(chat, 'Чек принял: № ' + cap.order + ', курьеру ' + tgMoney_(cap.sum) + ' ₸.' +
                     tgMismatch_(st0) + '\nЧерез кого отправили?', TG_SERVICES);
@@ -1015,30 +1061,22 @@ function tgHandle_(u) {
 
   const st = tgState_(chat);
 
-  // Исправление номера. Работает только когда незаконченной записи нет:
-  // иначе цифра — это ответ на вопрос бота, а не правка.
+  // Исправление номера заказа. Работает только когда незаконченной записи
+  // нет: иначе цифра — это ответ на вопрос бота, а не правка.
   if (!st) {
     const mFix = text.match(/^(?:\/?номер|№|испр(?:авить)?)\s*:?\s*№?\s*(\d{2,7})$/i);
     const toBot = m.reply_to_message && m.reply_to_message.from && m.reply_to_message.from.is_bot;
     if (mFix || (toBot && /^№?\s*\d{2,7}$/.test(text))) {
       const num = (mFix ? mFix[1] : text).replace(/\D/g, '');
-      const r = tgFixOrder_(chat, toBot ? m.reply_to_message.message_id : 0, num);
-      if (!r) {
-        tgSend_(chat, 'Не нашла, какую строку править. Ответьте правильным номером ' +
-                      'на моё сообщение «Записала…» по этому чеку.');
-      } else if (r.same) {
-        tgSend_(chat, 'Там и так № ' + num + ' — ничего не меняла.');
-      } else {
-        tgSend_(chat, 'Исправила: № ' + (r.was || '—') + ' → № ' + num + '.');
-      }
+      const fx = tgFixOrder_(chat, toBot ? m.reply_to_message.message_id : 0, num);
+      if (!fx) tgSend_(chat, 'Не нашла, какую строку править. Ответьте правильным номером на моё сообщение «Записала…» по этому чеку.');
+      else if (fx.same) tgSend_(chat, 'Там и так № ' + num + ' — ничего не меняла.');
+      else tgSend_(chat, 'Исправила: № ' + (fx.was || '—') + ' → № ' + num + '.');
       return;
     }
   }
-
   if (!st) {
-    tgSend_(chat, 'Сначала пришлите чек — фото или PDF.\n\n' +
-                  'Ошиблись номером в прошлом чеке — ответьте на моё сообщение «Записала…» ' +
-                  'правильным номером.');
+    tgSend_(chat, 'Сначала пришлите чек — фото или PDF.');
     return;
   }
 
@@ -1071,19 +1109,38 @@ function tgHandle_(u) {
     return;
   }
 
-  if (st.step === 'service') {
-    st.service = text;
+  if (st.step === 'branch') {
+    const br = tgBranch_(text);
+    if (!br) { tgSend_(chat, 'Выберите филиал кнопкой ниже.', TG_BRANCHES); return; }
+    st.branch = br;
     let link = st.link || '';
     if (!link) { try { link = tgSaveFile_(st); } catch (err) { link = 'ошибка: ' + err.message; } }
     tgRename_(st);
-    const row = tgSaveRow_(chat, st, link);
+    tgSaveRow_(chat, st, link);
     tgState_(chat, null);
-    const sent = tgSend_(chat, 'Записала.\n№ ' + st.order + ' · курьеру ' + tgMoney_(st.sum) + ' ₸' +
+    tgSend_(chat, 'Записала.\n№ ' + st.order + ' · курьеру ' + tgMoney_(st.sum) + ' ₸' +
+            (st.osum ? ' · заказ ' + tgMoney_(st.osum) + ' ₸' : '') + ' · ' + st.service + ' · ' + st.branch +
+            tgMismatch_(st) +
+            '\n\nСледующий чек — просто пришлите файл.');
+    return;
+  }
+
+  if (st.step === 'service') {
+    st.service = text;
+    if (!st.branch) {
+      st.step = 'branch'; tgState_(chat, st);
+      tgSend_(chat, 'Какой филиал?', TG_BRANCHES);
+      return;
+    }
+    let link = st.link || '';
+    if (!link) { try { link = tgSaveFile_(st); } catch (err) { link = 'ошибка: ' + err.message; } }
+    tgRename_(st);
+    tgSaveRow_(chat, st, link);
+    tgState_(chat, null);
+    tgSend_(chat, 'Записала.\n№ ' + st.order + ' · курьеру ' + tgMoney_(st.sum) + ' ₸' +
             (st.osum ? ' · заказ ' + tgMoney_(st.osum) + ' ₸' : '') + ' · ' + st.service +
             tgMismatch_(st) +
-            '\n\nОшиблись номером — ответьте на это сообщение правильным номером.' +
-            '\nСледующий чек — просто пришлите файл.');
-    tgRememberMsg_(row, sent);
+            '\n\nСледующий чек — просто пришлите файл.');
     return;
   }
 }
@@ -1092,9 +1149,14 @@ function tgHandle_(u) {
 // необязательно сумма заказа, необязательно служба. Так оператор
 // закрывает чек одним сообщением, а не пятью.
 function tgCaption_(s) {
-  const t = String(s == null ? '' : s).trim();
+  let t = String(s == null ? '' : s).trim();
   if (!t) return null;
-  const nums = t.match(/\d[\d\s.,]*/g) || [];
+  // «тт9», «ТТ 10», «цех» — филиал; убираем его, чтобы цифра филиала не стала суммой
+  const bm = t.match(/(^|\s)(т{1,2}|t{1,2})\s?\d{1,2}(?=\s|$)|цех/i);
+  const branch = bm ? tgBranch_(bm[0]) : '';
+  if (bm) t = (t.slice(0, bm.index) + ' ' + t.slice(bm.index + bm[0].length)).trim();
+  // Числа разделяем пробелом: «4850 2550» — это два числа, а не одно
+  const nums = t.match(/\d+(?:[.,]\d+)?/g) || [];
   if (nums.length < 2) return null;
   const num = function (x) {
     return Number(String(x).replace(/[^\d.,]/g, '').replace(/\s/g, '').replace(',', '.'));
@@ -1108,7 +1170,7 @@ function tgCaption_(s) {
   TG_SERVICES.forEach(function (s2) {
     if (low.indexOf(s2.toLowerCase().slice(0, 4)) >= 0) service = s2;
   });
-  return { order: order, sum: sum, osum: osum, service: service };
+  return { order: order, sum: sum, osum: osum, service: service, branch: branch };
 }
 
 // Оператор написал одну сумму, а в чеке другая — молчать об этом нельзя
@@ -1279,6 +1341,7 @@ function tgSaveRow_(chat, st, link) {
     'Сумма курьеру, ₸':  st.sum,
     'Сумма заказа, ₸':   st.osum || '',
     'Служба':            st.service,
+    'Филиал':            st.branch || '',
     'Кто прислал':       st.who,
     'Чек':               cell,
     'Чат':               String(chat)
@@ -1286,47 +1349,8 @@ function tgSaveRow_(chat, st, link) {
   // Пишем по названиям колонок, а не по счёту: порядок в листе мог поменяться
   const head = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
   sheet.appendRow(head.map(function (h) { return h in val ? val[h] : ''; }));
-  return sheet.getLastRow();
-}
-
-// ══════════════════════════════════════════════════════════
-//  ИСПРАВЛЕНИЕ НОМЕРА ЗАКАЗА ИЗ ЧАТА
-//  Оператор пишет номер ответом (reply) на сообщение бота
-//  «Записала…» — бот правит именно ту строку. Без ответа
-//  команда «номер 5658» правит последнюю запись этого чата.
-//  Так исправление видно в переписке, и в таблицу никто не лезет.
-// ══════════════════════════════════════════════════════════
-function tgRememberMsg_(row, sent) {
-  if (!row || !sent || !sent.ok || !sent.result) return;
-  try {
-    const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(SHEET_RECEIPTS);
-    const head = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
-    const c = head.indexOf('Сообщение') + 1;
-    if (c) sheet.getRange(row, c).setValue("'" + sent.result.message_id);
-  } catch (e) { Logger.log('id сообщения не записался: ' + e); }
-}
-
-function tgFixOrder_(chat, msgId, num) {
-  const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(SHEET_RECEIPTS);
-  if (!sheet || sheet.getLastRow() < 2) return null;
-  const cols = sheet.getLastColumn();
-  const head = sheet.getRange(1, 1, 1, cols).getValues()[0].map(String);
-  const cNum = head.indexOf('№ заказа'), cChat = head.indexOf('Чат'), cMsg = head.indexOf('Сообщение');
-  if (cNum < 0 || cChat < 0) return null;
-  const vals = sheet.getRange(2, 1, sheet.getLastRow() - 1, cols).getValues();
-  const txt = function (v) { return String(v == null ? '' : v).replace(/^'/, '').trim(); };
-  let row = 0;
-  for (let i = vals.length - 1; i >= 0; i--) {
-    if (txt(vals[i][cChat]) !== String(chat)) continue;
-    // С ответом на сообщение строка определяется точно, без него берём последнюю
-    if (msgId) { if (cMsg >= 0 && txt(vals[i][cMsg]) === String(msgId)) { row = i + 2; break; } }
-    else { row = i + 2; break; }
-  }
-  if (!row) return null;
-  const was = txt(sheet.getRange(row, cNum + 1).getValue());
-  if (was === String(num)) return { row: row, was: was, same: true };
-  sheet.getRange(row, cNum + 1).setValue("'" + num);
-  return { row: row, was: was };
+  TG_LAST_ROW_ = sheet.getLastRow();
+  return TG_LAST_ROW_;
 }
 
 // Отдаём чеки в тул: он сверит их с отчётом 0080
@@ -1625,7 +1649,7 @@ function importYandexReport() {
   const rows = src.getRange(1, 1, src.getLastRow(), 8).getValues();
 
   const headers = ['Дата', 'Время', 'Дата перевода', 'Время перевода', '№ заказа',
-                   'Сумма курьеру, ₸', 'Сумма заказа, ₸', 'Служба', 'Кто прислал', 'Чек', 'Чат'];
+                   'Сумма курьеру, ₸', 'Сумма заказа, ₸', 'Служба', 'Кто прислал', 'Чек', 'Чат', 'Сообщение'];
   const sheet = getOrCreateSheet(SHEET_RECEIPTS, headers);
   ensureColumn(sheet, 'Дата перевода', 2);
   ensureColumn(sheet, 'Время перевода', 3);
@@ -1754,4 +1778,47 @@ function tgSetWebhook() {
 function tgDeleteWebhook() {
   const r = tgApi_('deleteWebhook', {});
   tell_(r.ok ? 'Вебхук снят.' : JSON.stringify(r));
+}
+
+
+// ══════════════════════════════════════════════════════════
+//  ИСПРАВЛЕНИЕ НОМЕРА ЗАКАЗА ИЗ ЧАТА
+//  Оператор пишет номер ответом (reply) на сообщение бота
+//  «Записала…» — бот правит именно ту строку. Без ответа
+//  команда «номер 5658» правит последнюю запись этого чата.
+//  Так исправление видно в переписке, и в таблицу никто не лезет.
+// ══════════════════════════════════════════════════════════
+let TG_LAST_ROW_ = 0;
+
+function tgRememberMsg_(row, sent) {
+  if (!row || !sent || !sent.ok || !sent.result) return;
+  try {
+    const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(SHEET_RECEIPTS);
+    const head = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
+    const c = head.indexOf('Сообщение') + 1;
+    if (c) sheet.getRange(row, c).setValue("'" + sent.result.message_id);
+  } catch (e) { Logger.log('id сообщения не записался: ' + e); }
+}
+
+function tgFixOrder_(chat, msgId, num) {
+  const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(SHEET_RECEIPTS);
+  if (!sheet || sheet.getLastRow() < 2) return null;
+  const cols = sheet.getLastColumn();
+  const head = sheet.getRange(1, 1, 1, cols).getValues()[0].map(String);
+  const cNum = head.indexOf('№ заказа'), cChat = head.indexOf('Чат'), cMsg = head.indexOf('Сообщение');
+  if (cNum < 0 || cChat < 0) return null;
+  const vals = sheet.getRange(2, 1, sheet.getLastRow() - 1, cols).getValues();
+  const txt = function (x) { return String(x == null ? '' : x).replace(/^'/, '').trim(); };
+  let row = 0;
+  for (let i = vals.length - 1; i >= 0; i--) {
+    if (txt(vals[i][cChat]) !== String(chat)) continue;
+    // С ответом на сообщение строка определяется точно, без него берём последнюю
+    if (msgId) { if (cMsg >= 0 && txt(vals[i][cMsg]) === String(msgId)) { row = i + 2; break; } }
+    else { row = i + 2; break; }
+  }
+  if (!row) return null;
+  const was = txt(sheet.getRange(row, cNum + 1).getValue());
+  if (was === String(num)) return { row: row, was: was, same: true };
+  sheet.getRange(row, cNum + 1).setValue("'" + num);
+  return { row: row, was: was };
 }
